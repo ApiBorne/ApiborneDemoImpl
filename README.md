@@ -1,13 +1,26 @@
-# Demo medical management system — ApiBorne Kiosk Integration Contract reference implementation
+# ApiBorne Kiosk Integration Contract — reference implementation (demo medical management system)
 
-A complete, runnable **reference implementation of the ApiBorne Kiosk
-Integration Contract** from the point of view of a medical management system (RIS, EMR…) **editor**: the
-system that owns patients and appointments, and that an ApiBorne check-in
-kiosk talks to during the patient journey.
+**[ApiBorne](https://www.apiborne.com/)** provides **patient self check-in
+kiosks** for clinics, hospitals and medical imaging centers: identification by
+health card or QR code, administrative data verification, required-document
+scanning, call tickets and reception cockpit.
+
+This repository is the complete, runnable **reference implementation of the
+ApiBorne Kiosk Integration Contract** — the vendor-neutral REST/OpenAPI
+contract that connects any **medical management system** (RIS, EMR, PMS…) to
+ApiBorne check-in kiosks — written from the **editor**'s point of view: the
+system that owns patients and appointments, and that the kiosk talks to
+directly during the patient journey.
 
 It is intentionally small and heavily commented so that a developer — or an
 AI assistant — can read it end to end and understand exactly what an editor
 must implement.
+
+- 🌐 **Official website** — [www.apiborne.com](https://www.apiborne.com/)
+- 📚 **Developer documentation** (French) —
+  [developers.apiborne.com](https://developers.apiborne.com/) : step-by-step
+  implementation guide, UML diagrams, downloadable OpenAPI/Swagger specs, and
+  this repository used as the running example, route by route.
 
 - **Stack**: Next.js (App Router) · React · TypeScript (strict) · Tailwind v4 ·
   shadcn/ui · SQLite (`better-sqlite3`, no ORM)
@@ -57,11 +70,11 @@ it implements.
 | `GET /appointments/{id}/notification-readiness` | `getNotificationReadiness` | [`.../[appointmentId]/notification-readiness/route.ts`](src/app/api/apiborneIntegrationService/v1/appointments/%5BappointmentId%5D/notification-readiness/route.ts) |
 | `POST /staff/sign-in` | `staffSignIn` | [`src/app/api/apiborneIntegrationService/v1/staff/sign-in/route.ts`](src/app/api/apiborneIntegrationService/v1/staff/sign-in/route.ts) |
 
-Five extra **configuration routes** (ApiBorne extension, not part of the 12
+Six extra **configuration routes** (ApiBorne extension, not part of the 12
 kiosk operations) expose the editor's reference data to the ApiBorne server —
-which also probes them to validate the integration before unlocking the rest
-of its admin configuration. Auth-key-only (server-to-server). The data behind
-them is editable in the demo's `/referentials` page:
+which also probes the first five to validate the integration before unlocking
+the rest of its admin configuration. Auth-key-only (server-to-server). The
+data behind them is editable in the demo's `/referentials` page:
 
 | Configuration route | Handler |
 |---|---|
@@ -70,6 +83,7 @@ them is editable in the demo's `/referentials` page:
 | `GET /config/practitioners` → `{ practitioners: [{ id, name, rppsId }] }` | [`.../config/practitioners/route.ts`](src/app/api/apiborneIntegrationService/v1/config/practitioners/route.ts) |
 | `GET /config/rooms` → `{ rooms: [{ id, name }] }` | [`.../config/rooms/route.ts`](src/app/api/apiborneIntegrationService/v1/config/rooms/route.ts) |
 | `GET /config/exams` → `{ exams: [{ id, name, examTypeId }] }` | [`.../config/exams/route.ts`](src/app/api/apiborneIntegrationService/v1/config/exams/route.ts) |
+| `GET /config/document-types` → `{ documentTypes: [{ documentType, label }] }` (recommended, not probed) | [`.../config/document-types/route.ts`](src/app/api/apiborneIntegrationService/v1/config/document-types/route.ts) |
 
 Shared building blocks (read these first):
 
@@ -85,20 +99,17 @@ Shared building blocks (read these first):
   rows → contract DTOs, the `{id}~{visibleId}` appointment-id convention and
   the `vendorData` round-trip.
 
-### Mandatory vs optional routes
+### All routes are mandatory
 
-The ApiBorne integration settings let an editor declare which **optional**
-routes it supports; the kiosk and the ApiBorne server degrade gracefully when
-one is missing (the editor may also answer `501 NOT_SUPPORTED`):
+There are **no optional routes** and no support declaration: every contract
+route must exist. An editor without a feature answers the minimal conforming
+form — empty document lists (the kiosk skips the flow), `204` no-op,
+systematic `404` for convocation codes, systematic `401` for staff sign-in.
+Start with the five journey routes (`identifyPatients`,
+`getAppointmentByCode`, `getAppointmentById`, `checkInAppointment`,
+`getNotificationReadiness`) — a kiosk runs a full check-in with those alone.
 
-- **Mandatory** (the minimal patient journey): `identifyPatients`,
-  `getAppointmentByCode`, `getAppointmentById`, `checkInAppointment`,
-  `getNotificationReadiness`.
-- **Optional**: `updatePatient`, `setAppointmentPrescriber`, the `documents`
-  group (list/upload/delete), `setAppointmentStatus` (Cockpit),
-  `staffSignIn` (Cockpit).
-
-**This demo implements all of them.**
+**This demo implements all of them for real.**
 
 ## Outbound calls to the ApiBorne server
 

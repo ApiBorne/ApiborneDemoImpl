@@ -13,9 +13,6 @@ data/
 .env.local
 .env*.local
 
-# IDE
-.idea/
-
 # Misc
 *.log
 .DS_Store
