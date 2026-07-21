@@ -1,0 +1,275 @@
+openapi: 3.0.3
+info:
+  title: ApiBorne — Routes de configuration
+  version: 1.0.0
+  description: |
+    Les **routes de configuration** exposent les référentiels de l'éditeur au
+    serveur ApiBorne : lieux, types d'examens, examens, praticiens, salles et
+    types de documents.
+
+    Elles complètent le Kiosk Integration Contract (`openapi.yaml`, routes de
+    communication appelées par la borne) : ici l'appelant est le **serveur
+    ApiBorne**, jamais une borne. Il les appelle :
+
+    - pour **sonder l'intégration** (config-check) : tant que les cinq routes de
+      référentiels (lieux, types d'examens, examens, praticiens, salles) ne
+      répondent pas correctement, la configuration des bornes reste verrouillée
+      dans l'admin ApiBorne — `/config/document-types` est recommandée mais
+      hors sonde ;
+    - pour **alimenter l'admin** : rattacher une borne à un lieu, cibler des
+      messages/critères par examen, type d'examen, praticien ou salle, amorcer
+      les préfixes de tickets.
+
+    Authentification : header `X-Kiosk-Auth-Key` uniquement (la clé
+    d'autorisation compte, affichée dans l'admin ApiBorne, page Connectivité) —
+    pas de `X-Kiosk-Device-Id`, l'appel ne vient pas d'une borne.
+
+    Les identifiants renvoyés ici font foi : ce sont eux que la borne comparera
+    aux champs des rendez-vous (`locationId`, `examId`, `examTypeId`,
+    `practitionerId`, `roomId`) — utilisez le même référentiel des deux côtés.
+  license:
+    name: Proprietary — ApiBorne
+servers:
+  - url: '{editorBaseUrl}/api/apiborneIntegrationService/v1'
+    variables:
+      editorBaseUrl:
+        default: https://ris.example.com
+        description: Racine du serveur de l'éditeur
+security:
+  - kioskAuthKey: []
+tags:
+  - name: configuration
+    description: Référentiels de l'éditeur, sondés et consommés par le serveur ApiBorne
+paths:
+  /config/office-places:
+    get:
+      tags: [configuration]
+      operationId: getConfigOfficePlaces
+      summary: Lieux (sites / zones d'accueil)
+      responses:
+        '200':
+          description: Référentiel des lieux
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [officePlaces]
+                properties:
+                  officePlaces:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IdName'
+              example:
+                officePlaces:
+                  - { id: '1', name: 'Clinique du Parc' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /config/exam-types:
+    get:
+      tags: [configuration]
+      operationId: getConfigExamTypes
+      summary: Types d'examens (avec préfixe de ticket)
+      responses:
+        '200':
+          description: Référentiel des types d'examens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [examTypes]
+                properties:
+                  examTypes:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/IdName'
+                        - type: object
+                          properties:
+                            ticketPrefix:
+                              type: string
+                              nullable: true
+                              maxLength: 8
+                              description: Amorce du format des tickets d'appel (surchargeable dans l'admin ApiBorne)
+              example:
+                examTypes:
+                  - { id: '2', name: 'SCANNER', ticketPrefix: 'SC' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /config/exams:
+    get:
+      tags: [configuration]
+      operationId: getConfigExams
+      summary: Examens (chacun rattaché à un type)
+      description: >-
+        L'examen individuel appartient à un type d'examen — cette granularité
+        permet le ciblage fin des messages et critères dans l'admin ApiBorne.
+      responses:
+        '200':
+          description: Référentiel des examens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [exams]
+                properties:
+                  exams:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/IdName'
+                        - type: object
+                          required: [examTypeId]
+                          properties:
+                            examTypeId:
+                              type: string
+                              maxLength: 128
+                              description: Id du type d'examen parent (référentiel /config/exam-types)
+              example:
+                exams:
+                  - { id: '7', name: 'SCANNER THORACIQUE', examTypeId: '2' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /config/practitioners:
+    get:
+      tags: [configuration]
+      operationId: getConfigPractitioners
+      summary: Praticiens
+      responses:
+        '200':
+          description: Référentiel des praticiens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [practitioners]
+                properties:
+                  practitioners:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/IdName'
+                        - type: object
+                          properties:
+                            rppsId:
+                              type: string
+                              nullable: true
+                              maxLength: 32
+              example:
+                practitioners:
+                  - { id: '4', name: 'Dr Alice MARTIN', rppsId: '10000000001' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /config/rooms:
+    get:
+      tags: [configuration]
+      operationId: getConfigRooms
+      summary: Salles
+      responses:
+        '200':
+          description: Référentiel des salles
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rooms]
+                properties:
+                  rooms:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/IdName'
+              example:
+                rooms:
+                  - { id: '3', name: 'Salle IRM 1' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /config/document-types:
+    get:
+      tags: [configuration]
+      operationId: getConfigDocumentTypes
+      summary: Types de documents (référentiel des documents requis)
+      description: |
+        Le référentiel des types de documents DE L'ÉDITEUR : c'est lui qui fait
+        foi pour les documents requis (`requiredDocumentTypes` de
+        `listAppointmentDocuments`) et les uploads (`documentType`).
+
+        Reprenez le **vocabulaire standard** (41 codes de
+        `contract/document-types.md`) pour tout type qui y correspond —
+        c'est lui qui rend les configurations interopérables — et ajoutez vos
+        codes propres si nécessaire. Route recommandée : sans elle, l'admin
+        ApiBorne se limite au vocabulaire standard.
+
+        Ce référentiel ne sert qu'à CONSTRUIRE la liste : le libellé
+        personnalisé et « fournissable par le patient depuis son téléphone »
+        se paramètrent ensuite dans l'admin ApiBorne (page Paramètres des
+        documents requis), à partir de VOTRE liste.
+      responses:
+        '200':
+          description: Référentiel des types de documents
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [documentTypes]
+                properties:
+                  documentTypes:
+                    type: array
+                    items:
+                      type: object
+                      required: [documentType, label]
+                      properties:
+                        documentType:
+                          type: string
+                          maxLength: 64
+                          pattern: '^[A-Za-z][A-Za-z0-9_-]*$'
+                          description: Code — standard ou propre à l'éditeur
+                        label:
+                          type: string
+                          maxLength: 256
+                          description: Libellé affichable (borne + admin)
+              example:
+                documentTypes:
+                  - { documentType: 'prescription', label: 'Ordonnance' }
+                  - { documentType: 'mutualInsuranceCard', label: 'Carte Mutuelle' }
+                  - { documentType: 'preOpChecklist', label: 'Check-list pré-opératoire (maison)' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    kioskAuthKey:
+      type: apiKey
+      in: header
+      name: X-Kiosk-Auth-Key
+      description: Clé d'autorisation compte (admin ApiBorne, page Connectivité)
+  schemas:
+    IdName:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          maxLength: 128
+          description: Identifiant opaque, stable — celui que porteront les RDV du contrat
+        name:
+          type: string
+          maxLength: 256
+          description: Libellé affichable
+  responses:
+    Unauthorized:
+      description: Clé absente ou invalide
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum: [INVALID_AUTH_KEY]
+                  message:
+                    type: string
+                  details:
+                    description: Détails libres (nullable)

@@ -1,0 +1,1490 @@
+openapi: 3.0.3
+
+info:
+  title: Kiosk Integration Contract
+  version: 1.0.0
+  license:
+    name: Proprietary — ApiBorne / EasyDoct
+    url: https://www.easydoct.com
+  contact:
+    name: Équipe ApiBorne
+    email: support@easydoct.com
+  description: |
+    # Kiosk Integration Contract V1
+
+    Contrat REST **vendor-neutral** entre la borne d'accueil patient (ApiBorne kiosk)
+    et l'éditeur du système de gestion médical. Il couvre le parcours patient
+    complet : **identification, consultation du RDV, mise à jour du patient, gestion
+    des documents, check-in** et opérations satellites.
+
+    La borne appelle l'éditeur **en direct** pendant le parcours patient. Le serveur
+    ApiBorne ne sert qu'à fournir la configuration de la borne au démarrage.
+
+    **Toutes les opérations du contrat sont OBLIGATOIRES.** Il n'y a pas de routes
+    optionnelles ni de déclaration de support : un éditeur qui n'a pas la
+    fonctionnalité implémente la forme minimale conforme — liste de documents vide
+    (la borne saute le flow), `204` sans effet (PATCH patient, prescripteur), `404`
+    systématique (codes de convocation non gérés), `401 INVALID_CREDENTIALS`
+    (pas de comptes personnel), `{ "ready": true }` (pas de notion de notification).
+    C'est ce qui garde la configuration côté ApiBorne simple et sans exception.
+
+    ## Authentification
+
+    Chaque requête porte deux headers obligatoires :
+
+    | Header | Contenu |
+    |---|---|
+    | `X-Kiosk-Auth-Key` | Clé d'autorisation partagée (provisionnée chez l'éditeur, connue de la conf borne) |
+    | `X-Kiosk-Device-Id` | Identifiant unique du device borne, connu de l'éditeur |
+
+    L'éditeur DOIT valider les deux : device inconnu → `401 UNKNOWN_DEVICE`,
+    clé invalide pour ce device → `401 INVALID_AUTH_KEY`.
+
+    ApiBorne envoie en plus le header **`X-Kiosk-Office-Id`** : l'identité de
+    l'office/du groupe de licences telle que configurée côté ApiBorne (identifiant
+    libre choisi par l'éditeur ; EasyDoct utilise la forme composée
+    `{officeId}!#!{officeVisibleId}`). Un éditeur multi-sites DEVRAIT s'en servir
+    pour sélectionner l'office cible au lieu de le résoudre via sa table de
+    devices (la flotte des bornes est gérée dans l'admin ApiBorne, un device
+    peut lui être inconnu). Un éditeur mono-site peut l'ignorer. Ce header doit
+    être autorisé dans `Access-Control-Allow-Headers` (CORS).
+
+    ## Contexte de configuration (`context`)
+
+    Chaque requête POST/PATCH/PUT peut porter un objet `context` optionnel :
+
+    - `context.locationId` : identifiant du lieu (site) associé au device.
+    - `context.config` : **sous-ensemble strict** de la configuration borne consommé par
+      l'éditeur (`identification`, `documents`, `checkIn`).
+    - `context.vendorData` : données opaques précédemment renvoyées par l'éditeur (voir plus bas).
+
+    **Règle contractuelle** : si `context.config` est fourni, l'éditeur DOIT l'utiliser
+    et NE DOIT JAMAIS rappeler le serveur ApiBorne pour obtenir de la configuration.
+    Si `context.config` est absent, l'éditeur utilise sa propre base de configuration
+    (mode legacy direct).
+
+    ## `vendorData`
+
+    Les réponses peuvent contenir des champs `vendorData` (objets JSON opaques, au niveau
+    réponse, patient ou rendez-vous). La borne ne les interprète jamais : elle les renvoie
+    **tels quels** dans `context.vendorData` des appels suivants du même parcours qui
+    concernent la même entité. L'éditeur peut s'en servir pour véhiculer des identifiants
+    internes (éviter des relectures en base).
+
+    ## Formats
+
+    - DTOs : JSON **camelCase**, en anglais.
+    - Dates : **ISO 8601** — `date` (`YYYY-MM-DD`) pour les dates de naissance,
+      `date-time` avec offset (`YYYY-MM-DDThh:mm:ss±hh:mm`) pour les horodatages.
+    - Listes : vraies listes JSON (jamais de chaînes jointes par séparateur).
+    - Fichiers : pages en **base64** dans des tableaux JSON (sans préfixe `data:`).
+    - Identifiants (`patient.id`, `appointment.id`, `documentId`, `examId`,
+      `locationId`…) : chaînes **opaques** choisies par l'éditeur (max 128 caractères,
+      utilisables dans une URL). La borne ne les interprète pas.
+
+    ## Erreurs normalisées
+
+    Statuts HTTP réels + corps `{ "error": { "code", "message", "details" } }` :
+
+    | Code | HTTP | Sens |
+    |---|---|---|
+    | `INVALID_AUTH_KEY` | 401 | Clé `X-Kiosk-Auth-Key` invalide pour ce device |
+    | `UNKNOWN_DEVICE` | 401 | `X-Kiosk-Device-Id` inconnu |
+    | `VALIDATION_ERROR` | 400 | Requête malformée ou champ invalide |
+    | `UNKNOWN_PATIENT` | 404 | Patient introuvable |
+    | `UNKNOWN_APPOINTMENT` | 404 | Rendez-vous introuvable |
+    | `UNKNOWN_DOCUMENT` | 404 | Document introuvable |
+    | `ALREADY_CHECKED_IN` | 409 | Check-in impossible car déjà effectué (voir sémantique check-in) |
+    | `UPLOAD_TOO_LARGE` | 413 | Upload au-delà de la taille max supportée |
+    | `INTERNAL_ERROR` | 500 | Erreur interne éditeur |
+    | `NOT_SUPPORTED` | 501 | DÉPRÉCIÉ — toutes les opérations sont obligatoires ; répondez la forme minimale conforme plutôt que 501 |
+
+    La borne retente les erreurs réseau et les 5xx (selon sa politique de retry),
+    mais **jamais** les 4xx.
+
+    ## Anomalies
+
+    Les anomalies de check-in sont transmises par **code** métier vendor-neutral
+    (ex. `PR`, `DI`), jamais par identifiant interne d'un éditeur. Le référentiel des
+    codes provient de la configuration borne (serveur ApiBorne).
+
+    ## Matching côté borne
+
+    Le contrat renvoie des données patient/RDV **pures**. Le matching des critères
+    d'admission et des messages d'information (kiosk informations) est effectué côté
+    borne à partir de sa propre configuration — l'éditeur n'a rien à implémenter.
+
+servers:
+  - url: '{editorBaseUrl}/api/apiborneIntegrationService/v1'
+    description: Serveur de l'éditeur (système de gestion médical) (base path imposé par le contrat)
+    variables:
+      editorBaseUrl:
+        default: https://ris.example.com
+        description: URL racine du serveur de l'éditeur
+
+security:
+  - kioskAuthKey: []
+    kioskDeviceId: []
+
+tags:
+  - name: patients
+    description: Identification et mise à jour des patients
+  - name: appointments
+    description: Consultation des rendez-vous, prescripteur, check-in
+  - name: documents
+    description: Documents attachés à un rendez-vous
+  - name: staff
+    description: Authentification du personnel d'accueil (Cockpit)
+
+paths:
+  /patients/identify:
+    post:
+      tags: [patients]
+      operationId: identifyPatients
+      summary: Identifier les patients et leurs RDV du jour
+      description: |
+        Recherche les patients correspondant aux critères (lecture carte de santé ou
+        saisie manuelle) et renvoie, pour chacun, ses rendez-vous **du jour** éligibles
+        au parcours borne.
+
+        - Les critères sont combinés : l'éditeur DOIT utiliser tous les critères fournis.
+        - `birthDate` seul ou `lastName`+`firstName` (+ `birthDate`) constituent le
+          minimum utile ; `socialSecurityId` est prioritaire quand il est fourni.
+        - Si `context.config.identification.twoFieldsIdentification` vaut `true`,
+          l'éditeur DOIT aussi tenter les recherches croisées à deux champs
+          (nom+date, prénom+date, nom+prénom) quand la recherche stricte ne donne rien.
+        - Aucun patient trouvé → `200` avec `patients: []` (pas une erreur).
+        - Patient trouvé sans RDV du jour → une entrée avec `appointments: []`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdentifyRequest'
+            examples:
+              healthCard:
+                summary: Identification par carte de santé
+                value:
+                  context:
+                    locationId: 'loc-42'
+                    config:
+                      identification:
+                        twoFieldsIdentification: true
+                  criteria:
+                    socialSecurityId: '180057510612345'
+                    lastName: 'DURAND'
+                    firstName: 'MARIE'
+                    birthDate: '1980-05-12'
+              manual:
+                summary: Identification manuelle (sans carte)
+                value:
+                  criteria:
+                    lastName: 'DURAND'
+                    firstName: 'MARIE'
+                    birthDate: '1980-05-12'
+      responses:
+        '200':
+          description: Résultat de l'identification (éventuellement vide)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IdentifyResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/by-code/{code}:
+    get:
+      tags: [appointments]
+      operationId: getAppointmentByCode
+      summary: Charger un RDV par code scanné ou saisi
+      description: |
+        Résout un rendez-vous à partir d'un **code** : contenu d'un QR code de
+        convocation ou identifiant lisible communiqué au patient. L'éditeur décide
+        des formats de code qu'il accepte ; la borne transmet le code tel quel
+        (URL-encodé).
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Code scanné (QR) ou saisi par le patient, tel quel
+          schema:
+            type: string
+            maxLength: 512
+      responses:
+        '200':
+          description: Rendez-vous résolu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}:
+    get:
+      tags: [appointments]
+      operationId: getAppointmentById
+      summary: Charger un RDV par identifiant
+      description: |
+        Recharge un rendez-vous déjà connu de la borne (après mise à jour du patient,
+        ou en mode simulation). Renvoie la même forme que `by-code`.
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      responses:
+        '200':
+          description: Rendez-vous
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}/status:
+    put:
+      tags: [appointments]
+      operationId: setAppointmentStatus
+      summary: Refléter un changement de statut fait dans le Cockpit ApiBorne
+      description: |
+        Reflète chez l'éditeur un changement de statut effectué dans le Cockpit
+        ApiBorne (accueil au guichet, fin de prise en charge) — l'agenda de
+        l'éditeur reste la source de vérité et doit refléter l'état réel.
+
+        Progression UNIQUEMENT vers l'avant (`checkedIn` → `inCare` → `done`) :
+        si le RDV est déjà à l'état demandé ou au-delà, l'appel est idempotent
+        (`200` sans effet). Un RDV annulé ou déjà terminé n'est pas modifiable
+        (`400 VALIDATION_ERROR`).
+
+        Contrairement aux opérations borne, l'appel vient du serveur ApiBorne :
+        seul le header `X-Kiosk-Auth-Key` est requis (pas de device, comme
+        `staff/sign-in`), la clé devant correspondre à l'établissement du RDV.
+      security:
+        - kioskAuthKey: []
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [checkedIn, inCare, done]
+                  description: État cible du RDV
+      responses:
+        '200':
+          description: Statut appliqué (ou déjà atteint — idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [checkedIn, inCare, done]
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /patients/{patientId}:
+    patch:
+      tags: [patients]
+      operationId: updatePatient
+      summary: Mettre à jour les données administratives du patient
+      description: |
+        Met à jour les données administratives du patient (sémantique PATCH : seuls
+        les champs présents dans `patient` sont modifiés ; un champ absent est
+        inchangé ; `null` explicite efface la valeur si l'éditeur le supporte).
+
+        Après un `204`, la borne recharge le rendez-vous via
+        `GET /appointments/{appointmentId}` pour obtenir les données canoniques.
+      parameters:
+        - name: patientId
+          in: path
+          required: true
+          description: Identifiant patient (`patient.id` d'une réponse précédente)
+          schema:
+            type: string
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePatientRequest'
+            examples:
+              full:
+                summary: Correction des coordonnées + taille/poids
+                value:
+                  context:
+                    locationId: 'loc-42'
+                  patient:
+                    firstName: 'Marie'
+                    lastName: 'Durand'
+                    birthDate: '1980-05-12'
+                    email: 'marie.durand@example.com'
+                    mobilePhone: '+33612345678'
+                    address:
+                      line1: '12 rue des Lilas'
+                      line2: ''
+                      zipCode: '75011'
+                      city: 'Paris'
+                    socialSecurityId: '280057510612345'
+                    heightCm: 168
+                    weightKg: 62
+                    referringPractitioner:
+                      name: 'MARTIN Paul'
+                      rppsId: '10101010101'
+      responses:
+        '204':
+          description: Mise à jour effectuée
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}/prescriber:
+    put:
+      tags: [appointments]
+      operationId: setAppointmentPrescriber
+      summary: Renseigner le prescripteur du RDV
+      description: |
+        Enregistre le prescripteur du rendez-vous (typiquement après validation par le
+        patient d'une proposition issue de l'analyse d'ordonnance). Opération
+        idempotente : rejouer la même valeur donne le même état.
+
+        Note : le flux d'analyse d'ordonnance (`analysis.prescriberProposals` de la
+        réponse d'upload) n'est **pas activé pour les intégrations libres** à ce
+        stade — l'analyse a vocation à être portée par ApiBorne, pas exigée de
+        l'éditeur. Il reste pleinement utilisé par l'intégration EasyDoct.
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetPrescriberRequest'
+            examples:
+              fromAnalysis:
+                summary: Prescripteur choisi parmi les propositions
+                value:
+                  prescriber:
+                    name: 'MARTIN Paul'
+                    rppsId: '10101010101'
+      responses:
+        '204':
+          description: Prescripteur enregistré
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}/documents:
+    get:
+      tags: [documents]
+      operationId: listAppointmentDocuments
+      summary: Lister les documents du RDV et les types attendus
+      description: |
+        Renvoie les documents déjà rattachés au rendez-vous et la liste des types de
+        documents **attendus** (obligatoires) pour ce rendez-vous. La borne en déduit
+        les documents manquants (comparaison sur `documentType`).
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      responses:
+        '200':
+          description: Documents et types attendus
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [documents]
+      operationId: uploadAppointmentDocument
+      summary: Uploader un document (pages images en base64)
+      description: |
+        Rattache un document au rendez-vous. Les pages sont des images (JPEG ou PNG)
+        encodées en base64, dans l'ordre de lecture. L'éditeur est libre du stockage
+        (conversion PDF, compression…).
+
+        - Taille : l'éditeur DOIT accepter au moins **10 Mo** par requête (JSON encodé) ;
+          au-delà de sa limite, il répond `413 UPLOAD_TOO_LARGE`. La borne limite ses
+          uploads à la taille annoncée dans sa configuration.
+        - `rotationAngle` est une **indication** de rotation à appliquer aux pages
+          (sens horaire) ; un éditeur peut l'ignorer.
+        - Si le document est une ordonnance (`documentType: prescription`) et que
+          l'éditeur dispose d'une analyse automatique, il PEUT renvoyer `analysis`
+          avec des propositions de prescripteur soumises au patient. Sinon, il omet
+          simplement `analysis`. **Intégrations libres : ce flux n'est pas activé à
+          ce stade** (la borne ne sollicite pas l'analyse ; l'IA a vocation à être
+          portée par ApiBorne) — il reste utilisé par l'intégration EasyDoct.
+        - Le remplacement d'un document existant se fait par `DELETE` préalable
+          (la borne s'en charge).
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadDocumentRequest'
+            examples:
+              prescription:
+                summary: Ordonnance de 2 pages
+                value:
+                  documentType: 'prescription'
+                  rotationAngle: 0
+                  pages:
+                    - contentBase64: '/9j/4AAQSkZJRgABAQAAAQ…'
+                      mimeType: 'image/jpeg'
+                    - contentBase64: '/9j/4AAQSkZJRgABAQAAAQ…'
+                      mimeType: 'image/jpeg'
+      responses:
+        '201':
+          description: Document créé
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadDocumentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          description: Upload trop volumineux
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDto'
+              example:
+                error:
+                  code: 'UPLOAD_TOO_LARGE'
+                  message: 'Request exceeds the 10 MB upload limit'
+                  details: null
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}/documents/{documentId}:
+    delete:
+      tags: [documents]
+      operationId: deleteAppointmentDocument
+      summary: Supprimer un document du RDV
+      description: |
+        Supprime un document rattaché au rendez-vous (utilisé par la borne avant de
+        ré-uploader un document du même type). Supprimer un document déjà supprimé
+        renvoie `404 UNKNOWN_DOCUMENT`.
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+        - name: documentId
+          in: path
+          required: true
+          description: Identifiant du document (`documents[].id`)
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '204':
+          description: Document supprimé
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}/check-in:
+    post:
+      tags: [appointments]
+      operationId: checkInAppointment
+      summary: Enregistrer l'arrivée du patient (check-in)
+      description: |
+        Enregistre l'arrivée du patient pour ce rendez-vous et déclenche, côté éditeur,
+        la suite du parcours (mise en salle d'attente, notification des équipes…).
+
+        - `anomalyCodes` : codes d'anomalies constatées pendant le parcours
+          (référentiel fourni par la configuration borne, vendor-neutral).
+        - Multi-RDV : quand le patient a plusieurs RDV du jour, la borne fait un
+          check-in par RDV. Le premier appel porte `sequence.number: 1` ;
+          les suivants référencent le RDV principal via `mainAppointmentId`.
+        - **Idempotence recommandée** : si le RDV est déjà check-in, l'éditeur DEVRAIT
+          renvoyer `200` avec le ticket existant. `409 ALREADY_CHECKED_IN` est réservé
+          au cas où l'état du RDV rend le check-in réellement impossible.
+        - `ticketNumber`/`ticketNumberFormatted` sont absents si l'éditeur ne gère pas
+          de file d'appel (la borne peut alors générer un ticket local).
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInRequest'
+            examples:
+              single:
+                summary: Check-in RDV unique, carte de santé lue, une anomalie
+                value:
+                  context:
+                    locationId: 'loc-42'
+                  identifiedWithHealthCard: true
+                  attendantCheckIn: false
+                  anomalyCodes: ['PR']
+                  sequence:
+                    number: 1
+                    count: 1
+                  examId: 'exam-77'
+                  linkedAppointmentIds: []
+                  otherExamIds: []
+              linked:
+                summary: Check-in du 2e RDV d'un patient multi-RDV
+                value:
+                  identifiedWithHealthCard: true
+                  attendantCheckIn: false
+                  anomalyCodes: []
+                  sequence:
+                    number: 2
+                    count: 2
+                  mainAppointmentId: 'apt-1001'
+                  examId: 'exam-78'
+                  linkedAppointmentIds: ['apt-1001']
+                  otherExamIds: ['exam-77']
+      responses:
+        '200':
+          description: Check-in effectué (ou déjà effectué — réponse idempotente)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Check-in impossible (état du RDV incompatible)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDto'
+              example:
+                error:
+                  code: 'ALREADY_CHECKED_IN'
+                  message: 'Appointment apt-1001 is already checked in'
+                  details: null
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/{appointmentId}/notification-readiness:
+    get:
+      tags: [appointments]
+      operationId: getNotificationReadiness
+      summary: Le dossier est-il prêt pour la notification des équipes ?
+      description: |
+        Indique si le dossier du rendez-vous est complet au sens de l'éditeur
+        (documents requis présents, prescripteur renseigné…), c'est-à-dire si le
+        check-in pourra notifier les équipes sans signaler un dossier incomplet.
+        La borne s'en sert pour décider d'ajouter l'anomalie « dossier incomplet ».
+
+        Un éditeur sans notion de notification renvoie `200 { "ready": true }`
+        (jamais `501`).
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+        - name: identifiedWithHealthCard
+          in: query
+          required: false
+          description: Le patient s'est identifié avec sa carte de santé
+          schema:
+            type: boolean
+            default: false
+        - name: sequenceNumber
+          in: query
+          required: false
+          description: Rang du RDV dans le parcours multi-RDV (1 = principal)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: examId
+          in: query
+          required: false
+          description: Identifiant d'examen du RDV
+          schema:
+            type: string
+            maxLength: 128
+        - name: otherExamIds
+          in: query
+          required: false
+          description: Identifiants d'examen des autres RDV du jour (séparés par des virgules)
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              maxLength: 128
+      responses:
+        '200':
+          description: État de préparation du dossier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationReadinessResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /staff/sign-in:
+    post:
+      tags: [staff]
+      operationId: staffSignIn
+      summary: Authentifier un membre du personnel d'accueil (Cockpit)
+      description: >-
+        Valide les identifiants d'un membre du personnel chez l'éditeur et
+        renvoie les établissements auxquels il a accès. Utilisé par le serveur
+        ApiBorne pour le login du Cockpit quand la source d'authentification
+        est l'éditeur : ApiBorne rapproche ensuite chaque établissement de sa
+        configuration locale (licence) pour établir la session. Contrairement
+        aux autres opérations, seul le header `X-Kiosk-Auth-Key` est requis
+        (pas de device : l'appel ne vient pas d'une borne).
+        Identifiants invalides → `401` avec le code `INVALID_CREDENTIALS`.
+      security:
+        - kioskAuthKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffSignInRequest'
+      responses:
+        '200':
+          description: Identifiants valides — établissements accessibles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffSignInResponse'
+        '401':
+          description: Clé d'autorisation invalide ou identifiants invalides
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDto'
+              examples:
+                invalidCredentials:
+                  value:
+                    error:
+                      code: 'INVALID_CREDENTIALS'
+                      message: 'Invalid login or password'
+                      details: null
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    kioskAuthKey:
+      type: apiKey
+      in: header
+      name: X-Kiosk-Auth-Key
+      description: Clé d'autorisation partagée provisionnée chez l'éditeur
+    kioskDeviceId:
+      type: apiKey
+      in: header
+      name: X-Kiosk-Device-Id
+      description: Identifiant unique du device borne
+
+  parameters:
+    AppointmentId:
+      name: appointmentId
+      in: path
+      required: true
+      description: Identifiant du rendez-vous (`appointment.id` d'une réponse précédente)
+      schema:
+        type: string
+        maxLength: 128
+
+  responses:
+    Unauthorized:
+      description: Authentification invalide (clé ou device)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          examples:
+            invalidKey:
+              value:
+                error:
+                  code: 'INVALID_AUTH_KEY'
+                  message: 'Invalid authorization key for this device'
+                  details: null
+            unknownDevice:
+              value:
+                error:
+                  code: 'UNKNOWN_DEVICE'
+                  message: 'Unknown kiosk device KIOSK-042'
+                  details: null
+    ValidationError:
+      description: Requête invalide
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            error:
+              code: 'VALIDATION_ERROR'
+              message: 'criteria.birthDate must be an ISO 8601 date (YYYY-MM-DD)'
+              details:
+                field: 'criteria.birthDate'
+    NotFound:
+      description: Ressource introuvable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          examples:
+            appointment:
+              value:
+                error:
+                  code: 'UNKNOWN_APPOINTMENT'
+                  message: 'Appointment apt-1001 not found'
+                  details: null
+            patient:
+              value:
+                error:
+                  code: 'UNKNOWN_PATIENT'
+                  message: 'Patient pat-77 not found'
+                  details: null
+            document:
+              value:
+                error:
+                  code: 'UNKNOWN_DOCUMENT'
+                  message: 'Document doc-15 not found'
+                  details: null
+    InternalError:
+      description: Erreur interne éditeur
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            error:
+              code: 'INTERNAL_ERROR'
+              message: 'Unexpected error'
+              details: null
+
+  schemas:
+    ErrorDto:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Code d'erreur normalisé du contrat
+              enum:
+                - INVALID_AUTH_KEY
+                - UNKNOWN_DEVICE
+                - VALIDATION_ERROR
+                - UNKNOWN_PATIENT
+                - UNKNOWN_APPOINTMENT
+                - UNKNOWN_DOCUMENT
+                - ALREADY_CHECKED_IN
+                - UPLOAD_TOO_LARGE
+                - INTERNAL_ERROR
+                - NOT_SUPPORTED
+            message:
+              type: string
+              description: Message lisible destiné aux logs (jamais affiché au patient)
+            details:
+              type: object
+              additionalProperties: true
+              description: Détails libres (champ en faute, limites…) — peut être null
+              nullable: true
+
+    VendorData:
+      type: object
+      description: |
+        Données opaques de l'éditeur. La borne les renvoie telles quelles dans
+        `context.vendorData` des appels suivants du même parcours concernant la même
+        entité, sans jamais les interpréter.
+      additionalProperties: true
+
+    KioskIntegrationContext:
+      type: object
+      description: |
+        Contexte transmis par la borne. Si `config` est fourni, l'éditeur DOIT
+        l'utiliser et NE DOIT JAMAIS rappeler le serveur ApiBorne.
+      properties:
+        locationId:
+          type: string
+          maxLength: 128
+          description: Identifiant du lieu (site) associé au device borne
+        config:
+          $ref: '#/components/schemas/KioskIntegrationConfig'
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    KioskIntegrationConfig:
+      type: object
+      description: |
+        Sous-ensemble strict de la configuration borne consommé par l'éditeur.
+        Chaque section est optionnelle ; les sections `documents` et `checkIn` sont
+        extensibles dans les versions mineures futures du contrat (un éditeur DOIT
+        ignorer les propriétés qu'il ne connaît pas).
+      properties:
+        identification:
+          type: object
+          description: Options d'identification des patients
+          properties:
+            twoFieldsIdentification:
+              type: boolean
+              description: >-
+                Autoriser les recherches croisées à deux champs quand la recherche
+                stricte ne donne aucun résultat
+        documents:
+          type: object
+          description: Options de gestion des documents (réservé aux versions futures)
+          additionalProperties: true
+        checkIn:
+          type: object
+          description: Options de check-in (réservé aux versions futures)
+          additionalProperties: true
+
+    Address:
+      type: object
+      description: Adresse postale du patient
+      properties:
+        line1:
+          type: string
+          nullable: true
+        line2:
+          type: string
+          nullable: true
+        zipCode:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+
+    PractitionerRef:
+      type: object
+      description: Référence d'un praticien (prescripteur, médecin traitant…)
+      properties:
+        name:
+          type: string
+          description: Nom affichable (ex. « MARTIN Paul »)
+        rppsId:
+          type: string
+          nullable: true
+          description: Identifiant RPPS (France) ou identifiant national équivalent
+
+    Patient:
+      type: object
+      description: Données administratives d'un patient
+      required: [id]
+      properties:
+        id:
+          type: string
+          maxLength: 128
+          description: Identifiant opaque du patient chez l'éditeur (utilisé dans `PATCH /patients/{patientId}`)
+        firstName:
+          type: string
+        lastName:
+          type: string
+        birthName:
+          type: string
+          nullable: true
+        birthDate:
+          type: string
+          format: date
+          description: Date de naissance (ISO `YYYY-MM-DD`)
+        sex:
+          type: string
+          enum: [male, female, unknown]
+        email:
+          type: string
+          nullable: true
+        mobilePhone:
+          type: string
+          nullable: true
+          description: Numéro au format international de préférence (`+33…`)
+        phone:
+          type: string
+          nullable: true
+        address:
+          $ref: '#/components/schemas/Address'
+        socialSecurityId:
+          type: string
+          nullable: true
+          description: Numéro de sécurité sociale (NIR), chiffres sans espaces
+        heightCm:
+          type: number
+          nullable: true
+          description: Taille en centimètres
+        weightKg:
+          type: number
+          nullable: true
+          description: Poids en kilogrammes
+        referringPractitioner:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/PractitionerRef'
+          nullable: true
+          description: Médecin traitant (null si inconnu)
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    Appointment:
+      type: object
+      description: Rendez-vous tel qu'exposé à la borne (données pures, sans matching)
+      required: [id, patientId, startDate]
+      properties:
+        id:
+          type: string
+          maxLength: 128
+          description: Identifiant opaque du RDV chez l'éditeur (utilisé dans les URLs du contrat)
+        patientId:
+          type: string
+          maxLength: 128
+          description: Identifiant du patient (`patient.id`)
+        startDate:
+          type: string
+          format: date-time
+          description: Date/heure de l'examen (ISO 8601 avec offset)
+        convocationDate:
+          type: string
+          format: date-time
+          nullable: true
+          description: Date/heure de convocation si différente de l'examen
+        locationId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: >-
+            Identifiant du lieu où le RDV a lieu, dans le référentiel de lieux partagé
+            avec la configuration borne (sert au contrôle « mauvais site »)
+        examId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: Identifiant de l'examen (référentiel éditeur, repris par la configuration borne)
+        examTypeId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: Identifiant du type d'examen (même référentiel)
+        examLabel:
+          type: string
+          nullable: true
+          description: Libellé affichable de l'examen
+        locationLabel:
+          type: string
+          nullable: true
+          description: Libellé affichable du lieu du RDV (affiché au patient, ex. message « mauvais site »)
+        practitionerId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: >-
+            Identifiant du praticien exécutant (référentiel éditeur, optionnel —
+            sert au matching des messages d'information côté borne)
+        roomId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: >-
+            Identifiant de la salle d'examen (référentiel éditeur, optionnel —
+            sert au matching des messages d'information côté borne)
+        status:
+          type: string
+          enum: [scheduled, checkedIn, inCare, done, cancelled]
+          description: État courant du RDV
+        prescriber:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/PractitionerRef'
+          nullable: true
+          description: Prescripteur du RDV (null si non renseigné)
+        ticketNumber:
+          type: integer
+          nullable: true
+          description: Numéro de ticket d'appel si déjà émis (null sinon)
+        ticketNumberFormatted:
+          type: string
+          nullable: true
+          description: Numéro de ticket formaté pour affichage (préfixe inclus)
+        managementPageUrl:
+          type: string
+          nullable: true
+          description: URL de la page patient « gérer mon RDV / envoyer mes documents » (affichée en QR code)
+        preparatorySurveyCompleted:
+          type: boolean
+          nullable: true
+          description: >-
+            État du questionnaire préparatoire du RDV : `true` = rempli,
+            `false` = attendu mais non rempli, `null`/absent = pas de
+            questionnaire géré ou attendu pour ce RDV. Optionnel — permet au
+            serveur ApiBorne d'évaluer localement les conditions de
+            notification des équipes (« questionnaire préparatoire fait »)
+            sans que l'éditeur ait de logique dédiée à implémenter.
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    PatientWithAppointments:
+      type: object
+      description: Un patient identifié et ses RDV du jour
+      required: [patient, appointments]
+      properties:
+        patient:
+          $ref: '#/components/schemas/Patient'
+        appointments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Appointment'
+
+    IdentifyCriteria:
+      type: object
+      description: >-
+        Critères d'identification. Au minimum `socialSecurityId`, ou
+        `lastName` + `firstName` (idéalement avec `birthDate`).
+      properties:
+        socialSecurityId:
+          type: string
+          description: NIR, chiffres sans espaces (l'éditeur DOIT tolérer les espaces)
+        lastName:
+          type: string
+        firstName:
+          type: string
+        birthDate:
+          type: string
+          format: date
+          description: Date de naissance (ISO `YYYY-MM-DD`)
+
+    IdentifyRequest:
+      type: object
+      required: [criteria]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        criteria:
+          $ref: '#/components/schemas/IdentifyCriteria'
+
+    IdentifyResponse:
+      type: object
+      required: [patients]
+      properties:
+        patients:
+          type: array
+          description: Patients correspondant aux critères (vide si aucun)
+          items:
+            $ref: '#/components/schemas/PatientWithAppointments'
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    AppointmentDetail:
+      type: object
+      description: Un RDV ciblé, son patient et les autres RDV du jour du même patient
+      required: [patient, appointment]
+      properties:
+        patient:
+          $ref: '#/components/schemas/Patient'
+        appointment:
+          $ref: '#/components/schemas/Appointment'
+        otherAppointments:
+          type: array
+          description: Autres RDV du jour du même patient (vide si aucun)
+          items:
+            $ref: '#/components/schemas/Appointment'
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    PatientUpdate:
+      type: object
+      description: Champs modifiables du patient (sémantique PATCH)
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        birthDate:
+          type: string
+          format: date
+        email:
+          type: string
+          nullable: true
+        mobilePhone:
+          type: string
+          nullable: true
+        address:
+          $ref: '#/components/schemas/Address'
+        socialSecurityId:
+          type: string
+          nullable: true
+          description: NIR, chiffres sans espaces
+        heightCm:
+          type: number
+          nullable: true
+        weightKg:
+          type: number
+          nullable: true
+        referringPractitioner:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/PractitionerRef'
+          nullable: true
+
+    UpdatePatientRequest:
+      type: object
+      required: [patient]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        patient:
+          $ref: '#/components/schemas/PatientUpdate'
+
+    SetPrescriberRequest:
+      type: object
+      required: [prescriber]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        prescriber:
+          $ref: '#/components/schemas/PractitionerRef'
+
+    DocumentType:
+      type: string
+      maxLength: 64
+      pattern: '^[A-Za-z][A-Za-z0-9_-]*$'
+      description: |
+        Code de type de document, vendor-neutral. Le RÉFÉRENTIEL appartient à
+        l'éditeur : il l'expose via `GET /config/document-types` (voir
+        `openapi-config.yaml`) et peut y déclarer ses propres codes — la borne
+        compare les codes tels quels (documents manquants, remplacement), le
+        libellé affiché voyage toujours dans `label`.
+
+        Un **vocabulaire standard** de 41 codes est défini dans
+        `contract/document-types.md` (`prescription`, `mutualInsuranceCard`,
+        `mriQuestionnaire`… et `other`, valeur par défaut des types inconnus) :
+        utilisez-le quand un code correspond — c'est lui qui garantit
+        l'interopérabilité des configurations entre éditeurs. Un éditeur qui ne
+        reconnaît pas un code le traite comme `other`.
+
+    Document:
+      type: object
+      description: Document rattaché au rendez-vous
+      required: [id, documentType]
+      properties:
+        id:
+          type: string
+          maxLength: 128
+          description: Identifiant opaque du document (utilisé dans `DELETE`)
+        documentType:
+          $ref: '#/components/schemas/DocumentType'
+        label:
+          type: string
+          nullable: true
+          description: Libellé affichable du type de document (langue de l'éditeur)
+        availableOnPhone:
+          type: boolean
+          nullable: true
+          description: >-
+            Le patient peut fournir ce document depuis son téléphone
+            (via `appointment.managementPageUrl`)
+
+    RequiredDocumentType:
+      type: object
+      description: Type de document attendu pour le rendez-vous
+      required: [documentType]
+      properties:
+        documentType:
+          $ref: '#/components/schemas/DocumentType'
+        label:
+          type: string
+          nullable: true
+        availableOnPhone:
+          type: boolean
+          nullable: true
+
+    DocumentsResponse:
+      type: object
+      required: [documents, requiredDocumentTypes]
+      properties:
+        documents:
+          type: array
+          description: Documents déjà rattachés au RDV
+          items:
+            $ref: '#/components/schemas/Document'
+        requiredDocumentTypes:
+          type: array
+          description: Types de documents attendus (obligatoires) pour ce RDV
+          items:
+            $ref: '#/components/schemas/RequiredDocumentType'
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    DocumentPage:
+      type: object
+      required: [contentBase64]
+      properties:
+        contentBase64:
+          type: string
+          description: Contenu de la page encodé en base64, **sans** préfixe `data:`
+        mimeType:
+          type: string
+          enum: [image/jpeg, image/png]
+          default: image/jpeg
+
+    UploadDocumentRequest:
+      type: object
+      required: [documentType, pages]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        documentType:
+          $ref: '#/components/schemas/DocumentType'
+        pages:
+          type: array
+          minItems: 1
+          description: Pages du document dans l'ordre de lecture
+          items:
+            $ref: '#/components/schemas/DocumentPage'
+        rotationAngle:
+          type: integer
+          enum: [0, 90, 180, 270]
+          default: 0
+          description: Rotation (sens horaire) à appliquer aux pages — indication, ignorable
+
+    UploadDocumentResponse:
+      type: object
+      required: [documentId]
+      properties:
+        documentId:
+          type: string
+          maxLength: 128
+          description: Identifiant du document créé
+        analysis:
+          type: object
+          nullable: true
+          description: Résultat d'analyse automatique du document (optionnel)
+          properties:
+            prescriberProposals:
+              type: array
+              description: Propositions de prescripteur détectées (soumises au patient)
+              items:
+                $ref: '#/components/schemas/PractitionerRef'
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    CheckInRequest:
+      type: object
+      required: [identifiedWithHealthCard, anomalyCodes, sequence]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        identifiedWithHealthCard:
+          type: boolean
+          description: Le patient s'est identifié avec sa carte de santé (et non manuellement)
+        attendantCheckIn:
+          type: boolean
+          default: false
+          description: Check-in effectué par un accompagnant/brancardier (mode paramédical)
+        anomalyCodes:
+          type: array
+          description: Codes des anomalies constatées pendant le parcours (référentiel de la configuration borne)
+          items:
+            type: string
+            maxLength: 32
+        documentsComplete:
+          type: boolean
+          nullable: true
+          description: >-
+            Dossier documentaire complet au moment du check-in : tous les types de
+            documents requis (`requiredDocumentTypes` de `listAppointmentDocuments`)
+            sont fournis. Absent/`null` quand la borne ne gère pas les documents
+            pour ce parcours (fonctionnalité désactivée ou groupe `documents` non
+            supporté par l'éditeur). L'éditeur PEUT le tracer sur le dossier
+            (indicateur « dossier complet/incomplet » à l'arrivée).
+        sequence:
+          type: object
+          required: [number, count]
+          description: Position de ce RDV dans le parcours multi-RDV du patient
+          properties:
+            number:
+              type: integer
+              minimum: 1
+              description: Rang de ce check-in (1 = RDV principal)
+            count:
+              type: integer
+              minimum: 1
+              description: Nombre total de RDV du jour concernés
+        otherAppointmentsReadyForCheckIn:
+          type: boolean
+          default: false
+          description: >-
+            Au moins un autre RDV du jour du patient est également prêt pour le
+            check-in (indication pour le regroupement des notifications côté éditeur)
+        mainAppointmentId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: Identifiant du RDV principal (présent seulement pour les RDV liés, `sequence.number` > 1)
+        linkedAppointmentIds:
+          type: array
+          description: Identifiants des autres RDV du jour inclus dans le même parcours
+          items:
+            type: string
+            maxLength: 128
+        examId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: Identifiant d'examen de ce RDV
+        otherExamIds:
+          type: array
+          description: Identifiants d'examen des autres RDV du parcours
+          items:
+            type: string
+            maxLength: 128
+        proposedTicket:
+          type: object
+          nullable: true
+          description: >-
+            Numéro de ticket proposé par la borne (réservé auprès du serveur
+            ApiBorne avant le check-in). L'éditeur PEUT l'adopter comme numéro
+            d'appel et DOIT l'accepter sans erreur s'il ne l'adopte pas. Quand la
+            configuration borne est portée par ApiBorne, la borne affiche et
+            imprime ce ticket quel que soit le contenu de `CheckInResponse`
+            (le ticket éditeur est alors ignoré et tracé en log).
+          properties:
+            number:
+              type: integer
+              description: Numéro de ticket réservé (offset par lieu inclus)
+            formattedNumber:
+              type: string
+              maxLength: 32
+              description: Numéro formaté pour affichage (préfixe de type d'examen inclus)
+
+    CheckInResponse:
+      type: object
+      properties:
+        ticketNumber:
+          type: integer
+          nullable: true
+          description: Numéro de ticket d'appel (absent/null si l'éditeur ne gère pas de file d'appel)
+        ticketNumberFormatted:
+          type: string
+          nullable: true
+          description: Numéro de ticket formaté pour affichage (préfixe inclus)
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    StaffSignInRequest:
+      type: object
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          maxLength: 256
+          description: Identifiant de connexion du membre du personnel (email ou login éditeur)
+        password:
+          type: string
+          maxLength: 256
+          description: Mot de passe (transmis uniquement en HTTPS)
+
+    StaffSignInResponse:
+      type: object
+      required: [offices]
+      properties:
+        offices:
+          type: array
+          description: >-
+            Établissements accessibles à l'utilisateur (éligibles au module
+            borne). ApiBorne rapproche `officeId`/`officeVisibleId` de sa
+            configuration locale pour résoudre la licence.
+          items:
+            type: object
+            required: [officeId, name]
+            properties:
+              officeId:
+                type: string
+                maxLength: 128
+                description: Identifiant de l'établissement chez l'éditeur
+              officeVisibleId:
+                type: string
+                nullable: true
+                maxLength: 128
+                description: Identifiant visible/public de l'établissement (si distinct)
+              name:
+                type: string
+                maxLength: 256
+                description: Nom affichable de l'établissement
+        userEmail:
+          type: string
+          nullable: true
+          maxLength: 256
+          description: Email de l'utilisateur chez l'éditeur (clé stable pour les préférences par utilisateur)
+        userDisplayName:
+          type: string
+          nullable: true
+          maxLength: 256
+          description: Nom affichable de l'utilisateur
+        vendorData:
+          $ref: '#/components/schemas/VendorData'
+
+    NotificationReadinessResponse:
+      type: object
+      required: [ready]
+      properties:
+        ready:
+          type: boolean
+          description: Le dossier est complet, le check-in ne signalera pas de dossier incomplet
+        reason:
+          type: string
+          nullable: true
+          description: Raison de non-préparation (absent quand `ready` vaut true)
+          enum:
+            - notificationNotConfigured
+            - notificationDisabled
+        vendorData:
+          $ref: '#/components/schemas/VendorData'

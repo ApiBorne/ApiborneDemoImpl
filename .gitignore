@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Local SQLite database (recreated and seeded automatically on first start)
+data/
+
+# Environment (copy .env.example to .env.local and adjust)
+.env
+.env.local
+.env*.local
+
+# IDE
+.idea/
+
+# Misc
+*.log
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts

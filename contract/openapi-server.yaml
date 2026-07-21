@@ -1,0 +1,302 @@
+openapi: 3.0.3
+info:
+  title: ApiBorne — Services offerts par le serveur
+  version: 1.0.0
+  description: |
+    Les **services offerts par le serveur ApiBorne** sont les routes que le
+    système de l'éditeur appelle (sens éditeur → ApiBorne). Ils gardent le
+    Cockpit et la numérotation des tickets synchrones avec l'agenda de
+    l'éditeur quand la configuration des bornes est portée par ApiBorne.
+
+    **Comment appeler :**
+    - URL de base : le serveur ApiBorne communiqué à l'installation
+      (`{apiborneServerUrl}`) ;
+    - header `Authorization` : la clé d'autorisation compte **brute** (pas de
+      préfixe `Bearer`) — la même que la clé `X-Kiosk-Auth-Key` des routes du
+      contrat, affichée dans l'admin ApiBorne, page Connectivité ;
+    - corps : identifier la licence cible par **`licenceUuid`** (affiché dans
+      l'admin ApiBorne, page Connectivité, et reporté chez l'éditeur à
+      l'installation — comme la clé). C'est LE moyen d'identification pour un
+      éditeur tiers ; les autres champs de `LicenceIdentity` sont réservés aux
+      intégrations historiques ;
+    - `contractAppointmentId` : l'identifiant du RDV tel qu'exposé sur le
+      contrat.
+
+    **Best-effort obligatoire :** ne bloquez jamais votre flux métier sur un
+    échec (timeout court recommandé : 8 s ; échecs loggés et avalés ; repli en
+    numérotation locale pour `issueForAppointment`).
+  license:
+    name: Proprietary — ApiBorne
+servers:
+  - url: '{apiborneServerUrl}'
+    variables:
+      apiborneServerUrl:
+        default: https://server.apiborne.com
+        description: Serveur ApiBorne (communiqué à l'installation)
+security:
+  - brandAuthorizationKey: []
+tags:
+  - name: tickets
+    description: Numérotation partagée et cycle de vie des tickets d'appel
+  - name: configuration-accueil
+    description: Réglages d'accueil portés par ApiBorne, lus par l'éditeur
+paths:
+  /api/kioskTicket/issueForAppointment:
+    post:
+      tags: [tickets]
+      operationId: issueForAppointment
+      summary: Émettre un ticket pour une arrivée pointée dans l'agenda éditeur
+      description: >-
+        Même séquence de numérotation que les check-ins borne (offset par lieu
+        et préfixe inclus) ; le ticket créé apparaît au Cockpit. Idempotent par
+        `requestUid` — mais le uid doit être UNIQUE PAR GÉNÉRATION : annuler
+        l'arrivée puis re-pointer doit consommer un nouveau uid (donc un
+        nouveau numéro).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LicenceIdentity'
+                - type: object
+                  required: [officePlaceId, requestUid]
+                  properties:
+                    officePlaceId:
+                      type: integer
+                      description: Lieu du RDV (référentiel partagé)
+                    requestUid:
+                      type: string
+                      maxLength: 128
+                      description: Uid d'idempotence, unique par génération
+                    prefix:
+                      type: string
+                      nullable: true
+                      maxLength: 8
+                      description: Préfixe du ticket ; absent → calculé par ApiBorne depuis sa configuration
+                    examTypeId:
+                      type: string
+                      nullable: true
+                      description: Repli du calcul de préfixe
+                    examTypeLabel:
+                      type: string
+                      nullable: true
+                      description: Repli du calcul de préfixe
+                    contractAppointmentId:
+                      type: string
+                      nullable: true
+                    patientDisplayName:
+                      type: string
+                      nullable: true
+                    examLabel:
+                      type: string
+                      nullable: true
+      responses:
+        '200':
+          description: Ticket émis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  number: { type: integer }
+                  formattedNumber: { type: string }
+                  day: { type: string, example: '2026-07-21' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/kioskTicket/appointmentStatusChanged:
+    post:
+      tags: [tickets]
+      operationId: appointmentStatusChanged
+      summary: Pousser chaque changement d'état d'un RDV (Cockpit temps réel)
+      description: >-
+        À appeler à CHAQUE changement d'état d'un RDV du jour (fire-and-forget).
+        ApiBorne met à jour ses tickets, invalide son cache Cockpit et émet
+        l'événement temps réel. RDV sans ticket ce jour-là → `{ "updated": 0 }`
+        (inoffensif).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LicenceIdentity'
+                - type: object
+                  required: [contractAppointmentId, status]
+                  properties:
+                    contractAppointmentId:
+                      type: string
+                    status:
+                      type: string
+                      enum: [scheduled, checkedIn, inCare, done, cancelled]
+      responses:
+        '200':
+          description: Tickets mis à jour
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/kioskTicket/cancelForAppointment:
+    post:
+      tags: [tickets]
+      operationId: cancelForAppointment
+      summary: Annuler les tickets du jour d'un RDV (refaire l'accueil)
+      description: >-
+        Les tickets passent à l'état `cancelled` et disparaissent du Cockpit ;
+        le prochain passage borne réservera un nouveau numéro. Idempotent :
+        aucun ticket actif → `{ "cancelled": 0 }`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LicenceIdentity'
+                - type: object
+                  required: [contractAppointmentId]
+                  properties:
+                    contractAppointmentId:
+                      type: string
+      responses:
+        '200':
+          description: Tickets annulés
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/kioskTicket/getCheckinNotifySettings:
+    post:
+      tags: [configuration-accueil]
+      operationId: getCheckinNotifySettings
+      summary: Lire les réglages d'accueil portés par ApiBorne
+      description: >-
+        Quand les conditions de notification d'accueil sont paramétrées dans
+        l'admin ApiBorne, l'éditeur les lit ici (entrées globale et par lieu,
+        anomalies exclues transmises par CODE — retraduisez-les dans vos ids).
+        Cache court recommandé (~30 s), repli sur votre configuration locale si
+        le serveur est injoignable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LicenceIdentity'
+      responses:
+        '200':
+          description: Réglages d'accueil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settings:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        officePlaceId:
+                          type: integer
+                          nullable: true
+                          description: null = entrée globale
+                        enabled: { type: boolean }
+                        excludedAnomalyCodes:
+                          type: array
+                          items: { type: string }
+                  features:
+                    type: object
+                    description: Indicateurs de comportement pertinents
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/kioskTicket/printTicket:
+    post:
+      tags: [tickets]
+      operationId: printTicket
+      summary: Réimprimer un ticket sur une borne du lieu
+      description: >-
+        ApiBorne rend le template de ticket configuré dans son admin, choisit
+        l'imprimante cible (borne du lieu ou imprimante de guichet) et déclenche
+        l'impression. L'éditeur ne fournit que le contexte (`data` injecté dans
+        le template).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/LicenceIdentity'
+                - type: object
+                  required: [officePlaceId]
+                  properties:
+                    officePlaceId:
+                      type: integer
+                    kioskDeskId:
+                      type: integer
+                      nullable: true
+                      description: Guichet appelant (imprimante de guichet prioritaire)
+                    data:
+                      type: object
+                      description: Données du RDV injectées dans le template de ticket
+      responses:
+        '200':
+          description: Impression déclenchée
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  printed: { type: boolean }
+                  deviceExternalId: { type: string, nullable: true }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    brandAuthorizationKey:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Clé d'autorisation compte BRUTE (pas de préfixe Bearer) — admin ApiBorne, page Connectivité
+  schemas:
+    LicenceIdentity:
+      type: object
+      required: [licenceUuid]
+      description: >-
+        Identification de la licence cible : `licenceUuid` — il prime sur tout
+        autre champ et suffit. Les champs dépréciés n'existent que pour les
+        intégrations historiques : ne les envoyez pas (tout identifiant fourni
+        est vérifié, un champ obsolète fait rejeter l'appel).
+      properties:
+        licenceUuid:
+          type: string
+          description: UUID de la licence (admin ApiBorne, page Connectivité) — l'identification de référence
+        officeVisibleId:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Réservé aux intégrations historiques — ne pas utiliser
+        brandId:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Réservé aux intégrations historiques — ne pas utiliser
+        officeId:
+          type: string
+          nullable: true
+          deprecated: true
+          description: Réservé aux intégrations historiques — ne pas utiliser
+  responses:
+    Unauthorized:
+      description: Clé de compte invalide ou licence non résolue
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
