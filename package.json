@@ -2,7 +2,8 @@
   "name": "apiborne-demo-ris",
   "version": "1.0.0",
   "private": true,
-  "description": "Reference implementation of the ApiBorne Kiosk Integration Contract — a demo RIS (Radiology Information System) editor with an agenda UI, built with Next.js, shadcn/ui, Tailwind and SQLite.",
+  "license": "MIT",
+  "description": "Reference implementation of the ApiBorne Kiosk Integration Contract — patient self check-in kiosks for clinics, hospitals and medical imaging centers. A demo medical management system (RIS/EMR) editor with an agenda UI, built with Next.js, shadcn/ui, Tailwind and SQLite. Docs: https://developers.apiborne.com",
   "scripts": {
     "dev": "next dev --turbopack -p 3020",
     "build": "next build",

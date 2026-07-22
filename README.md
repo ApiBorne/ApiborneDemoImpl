@@ -21,6 +21,8 @@ must implement.
   [developers.apiborne.com](https://developers.apiborne.com/) : step-by-step
   implementation guide, UML diagrams, downloadable OpenAPI/Swagger specs, and
   this repository used as the running example, route by route.
+- ⚖️ **License** — [MIT](LICENSE) : reuse this code freely in your own
+  integration.
 
 - **Stack**: Next.js (App Router) · React · TypeScript (strict) · Tailwind v4 ·
   shadcn/ui · SQLite (`better-sqlite3`, no ORM)
