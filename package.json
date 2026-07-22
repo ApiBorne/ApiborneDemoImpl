@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run typecheck",
     "format": "prettier --write .",
-    "db:reset": "node -e \"const fs=require('fs');const p='./data/demo.db';if(fs.existsSync(p)){fs.rmSync(p)};console.log('demo.db removed — it will be recreated and seeded on next start')\""
+    "db:reset": "node -e \"const fs=require('fs');const p='./data/demo.db';if(fs.existsSync(p)){fs.rmSync(p)};console.log('demo.db removed — it will be recreated and seeded on next start')\"",
+    "keys:generate": "node scripts/generate-keys.mjs",
+    "encrypted-curl": "node scripts/encrypted-curl.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.0",

@@ -10,21 +10,33 @@
  */
 import type { NextRequest } from "next/server";
 import { requireKioskAuth } from "@/server/contract/auth";
+import { withContractCrypto } from "@/server/contract/encryption";
 import { contractError, ok, withErrorBoundary } from "@/server/contract/errors";
-import { resolveAppointment, toAppointmentDetail } from "@/server/contract/resolve";
+import {
+  resolveAppointment,
+  toAppointmentDetail,
+} from "@/server/contract/resolve";
 
 export { corsOptions as OPTIONS } from "@/server/contract/cors";
 
 export const GET = withErrorBoundary(
-  async (request: NextRequest, context: { params: Promise<{ appointmentId: string }> }) => {
-    const authError = requireKioskAuth(request);
-    if (authError) return authError;
+  withContractCrypto(
+    async (
+      request: NextRequest,
+      context: { params: Promise<{ appointmentId: string }> },
+    ) => {
+      const authError = requireKioskAuth(request);
+      if (authError) return authError;
 
-    const { appointmentId } = await context.params;
-    const appointment = resolveAppointment(appointmentId);
-    if (!appointment) {
-      return contractError("UNKNOWN_APPOINTMENT", `Appointment '${appointmentId}' not found`);
-    }
-    return ok(toAppointmentDetail(appointment));
-  },
+      const { appointmentId } = await context.params;
+      const appointment = resolveAppointment(appointmentId);
+      if (!appointment) {
+        return contractError(
+          "UNKNOWN_APPOINTMENT",
+          `Appointment '${appointmentId}' not found`,
+        );
+      }
+      return ok(toAppointmentDetail(appointment));
+    },
+  ),
 );

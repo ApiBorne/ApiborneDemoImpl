@@ -18,9 +18,15 @@
  * whose public ids differ from their primary keys.
  */
 import { listExams, listOfficePlaces } from "@/server/db/repositories";
-import type { AppointmentRow, PatientRow, DocumentRow } from "@/server/db/types";
+import type {
+  AppointmentRow,
+  PatientRow,
+  DocumentRow,
+} from "@/server/db/types";
 
-export function encodeAppointmentId(appointment: Pick<AppointmentRow, "id" | "visible_id">): string {
+export function encodeAppointmentId(
+  appointment: Pick<AppointmentRow, "id" | "visible_id">,
+): string {
   return `${appointment.id}~${appointment.visible_id}`;
 }
 
@@ -28,7 +34,9 @@ export function encodeAppointmentId(appointment: Pick<AppointmentRow, "id" | "vi
  * Decodes "{id}~{visibleId}" (also accepts a bare visibleId, since the QR code
  * of this demo is the visibleId alone). Returns null when nothing matches.
  */
-export function decodeAppointmentId(contractId: string): { id?: number; visibleId?: string } | null {
+export function decodeAppointmentId(
+  contractId: string,
+): { id?: number; visibleId?: string } | null {
   if (!contractId) {
     return null;
   }
@@ -57,7 +65,10 @@ export function toContractPatient(patient: PatientRow) {
     mobilePhone: patient.mobile_phone,
     phone: patient.phone,
     address:
-      patient.address_line || patient.address_line2 || patient.zip_code || patient.city
+      patient.address_line ||
+      patient.address_line2 ||
+      patient.zip_code ||
+      patient.city
         ? {
             line1: patient.address_line,
             line2: patient.address_line2,
@@ -106,7 +117,10 @@ export function toContractAppointment(appointment: AppointmentRow) {
     roomId: appointment.room_id != null ? String(appointment.room_id) : null,
     status: appointment.status,
     prescriber: appointment.prescriber_name
-      ? { name: appointment.prescriber_name, rppsId: appointment.prescriber_rpps_id }
+      ? {
+          name: appointment.prescriber_name,
+          rppsId: appointment.prescriber_rpps_id,
+        }
       : null,
     ticketNumber: appointment.ticket_number,
     ticketNumberFormatted: appointment.ticket_number_formatted,
@@ -120,7 +134,10 @@ export function toContractAppointment(appointment: AppointmentRow) {
 }
 
 export function toContractDocument(document: DocumentRow) {
-  const pages = JSON.parse(document.pages_json) as { contentBase64: string; mimeType: string }[];
+  const pages = JSON.parse(document.pages_json) as {
+    contentBase64: string;
+    mimeType: string;
+  }[];
   return {
     id: String(document.id),
     documentType: document.document_type,

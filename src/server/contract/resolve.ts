@@ -9,7 +9,11 @@ import {
   listAppointmentsOfPatientOnDay,
 } from "@/server/db/repositories";
 import type { AppointmentRow } from "@/server/db/types";
-import { decodeAppointmentId, toContractAppointment, toContractPatient } from "./mappers";
+import {
+  decodeAppointmentId,
+  toContractAppointment,
+  toContractPatient,
+} from "./mappers";
 
 /** Resolves a contract appointment id ("{id}~{visibleId}" or bare visibleId). */
 export function resolveAppointment(contractId: string): AppointmentRow | null {
@@ -25,7 +29,9 @@ export function resolveAppointment(contractId: string): AppointmentRow | null {
     }
     return null;
   }
-  return decoded.visibleId ? (getAppointmentByVisibleId(decoded.visibleId) ?? null) : null;
+  return decoded.visibleId
+    ? (getAppointmentByVisibleId(decoded.visibleId) ?? null)
+    : null;
 }
 
 /** Local-day window around a date (the contract works on "today's" journey). */
@@ -44,9 +50,11 @@ export function dayWindowOf(date: Date): { start: Date; end: Date } {
 export function toAppointmentDetail(appointment: AppointmentRow) {
   const patient = getPatient(appointment.patient_id);
   const { start, end } = dayWindowOf(new Date(appointment.start_date));
-  const others = listAppointmentsOfPatientOnDay(appointment.patient_id, start, end).filter(
-    (a) => a.id !== appointment.id,
-  );
+  const others = listAppointmentsOfPatientOnDay(
+    appointment.patient_id,
+    start,
+    end,
+  ).filter((a) => a.id !== appointment.id);
   return {
     patient: patient ? toContractPatient(patient) : null,
     appointment: toContractAppointment(appointment),

@@ -129,4 +129,8 @@ export type SettingKey =
   | "licenceUuid"
   | "apiborneServerBaseUrl"
   | "pushEnabled"
-  | "enforceKnownDevices";
+  | "enforceKnownDevices"
+  // End-to-end encryption: one or more concatenated private key PEMs (newest
+  // first — rotation), and the strict mode rejecting clear-text calls.
+  | "contractEncryptionPrivateKeys"
+  | "requireEncryption";

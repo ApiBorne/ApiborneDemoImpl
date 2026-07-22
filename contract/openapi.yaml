@@ -49,6 +49,96 @@ info:
     peut lui être inconnu). Un éditeur mono-site peut l'ignorer. Ce header doit
     être autorisé dans `Access-Control-Allow-Headers` (CORS).
 
+    ## Chiffrement de bout en bout (optionnel)
+
+    Le contrat supporte un chiffrement applicatif **de bout en bout** entre la borne
+    et l'éditeur, par-dessus TLS : l'établissement génère une paire de clés RSA, la
+    clé PRIVÉE reste sur le serveur de l'éditeur, la clé PUBLIQUE est saisie dans
+    l'admin ApiBorne et transportée à la borne via sa configuration. Le serveur
+    ApiBorne et tous les intermédiaires réseau sont incapables de déchiffrer
+    (zero-knowledge). **Sans clé configurée, rien ne change** : les échanges restent
+    en clair (TLS seul) et l'éditeur n'a rien à implémenter.
+
+    ### Périmètre
+
+    Le chiffrement s'applique aux **routes de communication émises par la borne**
+    (les 10 opérations du parcours patient : `identifyPatients`,
+    `getAppointmentByCode`, `getAppointmentById`, `updatePatient`,
+    `setAppointmentPrescriber`, `listAppointmentDocuments`,
+    `uploadAppointmentDocument`, `deleteAppointmentDocument`, `checkInAppointment`,
+    `getNotificationReadiness`) — requêtes **et** réponses 2xx.
+
+    Ne sont PAS chiffrés :
+
+    - les **routes de configuration** (`openapi-config.yaml`) : ce sont des
+      référentiels sans donnée patient, consommés par le serveur ApiBorne ;
+    - `staffSignIn` et `setAppointmentStatus` : émises par le serveur ApiBorne,
+      qui est le consommateur légitime de leurs réponses (E2E sans objet, TLS seul).
+
+    ### Protocole (v1)
+
+    - **Chiffrement symétrique** : AES-256-GCM, IV de 96 bits, tag
+      d'authentification de 128 bits **concaténé à la fin du ciphertext**
+      (convention WebCrypto).
+    - **Enveloppe de clé** : la clé de session (32 octets) est wrappée en
+      **RSA-OAEP avec SHA-256** (clé publique de l'établissement, RSA ≥ 2048 bits,
+      4096 recommandé).
+    - **Clé de session unique PAR TENTATIVE** : chaque requête (y compris chaque
+      retry) génère une sessionKey ET un IV neufs — jamais de réutilisation.
+
+    La borne envoie deux headers sur **toutes les méthodes** (GET inclus, car les
+    réponses sont sensibles) :
+
+    | Header | Contenu |
+    |---|---|
+    | `X-Kiosk-Encryption: v1` | Version du protocole de chiffrement |
+    | `X-Kiosk-Encryption-Key` | SessionKey AES-256 wrappée RSA-OAEP-SHA256, en base64 |
+
+    Le corps chiffré (requêtes avec corps) remplace le JSON clair par l'enveloppe
+    (voir le schéma `EncryptedEnvelope`) :
+
+    ```json
+    { "encrypted": { "v": 1, "iv": "<base64 12 octets>", "data": "<base64 ciphertext+tag>" } }
+    ```
+
+    ### Réponses
+
+    - **2xx avec corps** : l'éditeur répond la même enveloppe
+      `{ "encrypted": { v, iv, data } }`, chiffrée avec la **même sessionKey** que
+      la requête et un **IV neuf** (jamais celui de la requête), plus le header
+      `X-Kiosk-Encryption: v1`.
+    - **204** : pas de corps, rien à chiffrer.
+    - **Erreurs 4xx/5xx : toujours EN CLAIR** (format `ErrorDto` normal) — cela
+      préserve la politique de retry et le diagnostic. Les messages d'erreur ne
+      doivent JAMAIS contenir de données patient.
+
+    ### Échec de déchiffrement
+
+    Si l'éditeur ne peut pas déchiffrer (clé inconnue, tag invalide, enveloppe
+    malformée), il répond `400 DECRYPTION_FAILED` (en clair). La borne ne retente
+    jamais et **ne bascule jamais en clair** (anti-downgrade) : l'erreur est
+    affichée et tracée.
+
+    ### Taille des uploads
+
+    La limite contractuelle de 10 Mo (`uploadAppointmentDocument`) s'entend sur le
+    **JSON en clair**. Le transport chiffré ajoute ~35 % (base64 du ciphertext) :
+    l'éditeur DOIT dimensionner sa limite de corps HTTP en conséquence.
+
+    ### Rotation des clés
+
+    L'éditeur PEUT conserver plusieurs clés privées et essayer chacune à l'unwrap
+    de la sessionKey. Procédure : déployer la nouvelle clé privée chez l'éditeur
+    **AVANT** de saisir la nouvelle clé publique dans l'admin ApiBorne, puis
+    retirer l'ancienne clé privée après la propagation de la configuration.
+
+    ### CORS
+
+    Les deux headers doivent être ajoutés au CORS de l'éditeur :
+
+    - `Access-Control-Allow-Headers: …, X-Kiosk-Encryption, X-Kiosk-Encryption-Key`
+    - `Access-Control-Expose-Headers: X-Kiosk-Encryption`
+
     ## Contexte de configuration (`context`)
 
     Chaque requête POST/PATCH/PUT peut porter un objet `context` optionnel :
@@ -96,6 +186,7 @@ info:
     | `UNKNOWN_DOCUMENT` | 404 | Document introuvable |
     | `ALREADY_CHECKED_IN` | 409 | Check-in impossible car déjà effectué (voir sémantique check-in) |
     | `UPLOAD_TOO_LARGE` | 413 | Upload au-delà de la taille max supportée |
+    | `DECRYPTION_FAILED` | 400 | Enveloppe chiffrée indéchiffrable (clé inconnue, tag invalide) — jamais retenté, jamais de fallback en clair |
     | `INTERNAL_ERROR` | 500 | Erreur interne éditeur |
     | `NOT_SUPPORTED` | 501 | DÉPRÉCIÉ — toutes les opérations sont obligatoires ; répondez la forme minimale conforme plutôt que 501 |
 
@@ -830,6 +921,7 @@ components:
                 - UNKNOWN_DOCUMENT
                 - ALREADY_CHECKED_IN
                 - UPLOAD_TOO_LARGE
+                - DECRYPTION_FAILED
                 - INTERNAL_ERROR
                 - NOT_SUPPORTED
             message:
@@ -840,6 +932,36 @@ components:
               additionalProperties: true
               description: Détails libres (champ en faute, limites…) — peut être null
               nullable: true
+
+    EncryptedEnvelope:
+      type: object
+      description: |
+        Enveloppe de chiffrement de bout en bout (schéma **documentaire** : quand le
+        chiffrement est actif, cette enveloppe REMPLACE le corps JSON en clair des
+        requêtes et des réponses 2xx des routes de communication — voir la section
+        « Chiffrement de bout en bout » de la description générale).
+
+        La sessionKey AES-256 wrappée RSA-OAEP-SHA256 voyage dans le header
+        `X-Kiosk-Encryption-Key` (base64), accompagnée de `X-Kiosk-Encryption: v1`.
+        La réponse est chiffrée avec la même sessionKey et un IV neuf.
+      required: [encrypted]
+      properties:
+        encrypted:
+          type: object
+          required: [v, iv, data]
+          properties:
+            v:
+              type: integer
+              enum: [1]
+              description: Version du protocole de chiffrement
+            iv:
+              type: string
+              description: IV AES-GCM de 96 bits (12 octets), en base64
+            data:
+              type: string
+              description: >-
+                Ciphertext AES-256-GCM avec le tag d'authentification de 128 bits
+                concaténé à la fin (convention WebCrypto), en base64
 
     VendorData:
       type: object

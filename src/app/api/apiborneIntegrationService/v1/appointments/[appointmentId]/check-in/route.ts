@@ -22,6 +22,7 @@
  */
 import type { NextRequest } from "next/server";
 import { requireKioskAuth } from "@/server/contract/auth";
+import { withContractCrypto } from "@/server/contract/encryption";
 import { contractError, ok, withErrorBoundary } from "@/server/contract/errors";
 import { resolveAppointment } from "@/server/contract/resolve";
 import { dayWindowOf } from "@/server/contract/resolve";
@@ -36,7 +37,10 @@ import {
 export { corsOptions as OPTIONS } from "@/server/contract/cors";
 
 /** Local fallback numbering: max ticket number of the day + 1. */
-function nextLocalTicket(examTypeId: number): { number: number; formatted: string } {
+function nextLocalTicket(examTypeId: number): {
+  number: number;
+  formatted: string;
+} {
   const { start, end } = dayWindowOf(new Date());
   const todays = listAppointmentsOfDay(start, end);
   const max = todays.reduce((m, a) => Math.max(m, a.ticket_number ?? 0), 0);
@@ -46,72 +50,97 @@ function nextLocalTicket(examTypeId: number): { number: number; formatted: strin
 }
 
 export const POST = withErrorBoundary(
-  async (request: NextRequest, context: { params: Promise<{ appointmentId: string }> }) => {
-    const authError = requireKioskAuth(request);
-    if (authError) return authError;
+  withContractCrypto(
+    async (
+      request: NextRequest,
+      context: { params: Promise<{ appointmentId: string }> },
+    ) => {
+      const authError = requireKioskAuth(request);
+      if (authError) return authError;
 
-    const { appointmentId } = await context.params;
-    const appointment = resolveAppointment(appointmentId);
-    if (!appointment) {
-      return contractError("UNKNOWN_APPOINTMENT", `Appointment '${appointmentId}' not found`);
-    }
+      const { appointmentId } = await context.params;
+      const appointment = resolveAppointment(appointmentId);
+      if (!appointment) {
+        return contractError(
+          "UNKNOWN_APPOINTMENT",
+          `Appointment '${appointmentId}' not found`,
+        );
+      }
 
-    const body = (await request.json().catch(() => null)) as {
-      sequence?: { number?: number; count?: number };
-      anomalyCodes?: string[];
-      documentsComplete?: boolean | null;
-      proposedTicket?: { number?: number; formattedNumber?: string } | null;
-    } | null;
-    if (!body?.sequence || typeof body.sequence.number !== "number") {
-      return contractError("VALIDATION_ERROR", "sequence is required", { field: "sequence" });
-    }
+      const body = (await request.json().catch(() => null)) as {
+        sequence?: { number?: number; count?: number };
+        anomalyCodes?: string[];
+        documentsComplete?: boolean | null;
+        proposedTicket?: { number?: number; formattedNumber?: string } | null;
+      } | null;
+      if (!body?.sequence || typeof body.sequence.number !== "number") {
+        return contractError("VALIDATION_ERROR", "sequence is required", {
+          field: "sequence",
+        });
+      }
 
-    // Idempotence: replaying the check-in of an already-checked-in (or later
-    // in-care) appointment returns the existing ticket with 200.
-    if (appointment.status === "checkedIn" || appointment.status === "inCare") {
-      return ok({
-        ticketNumber: appointment.ticket_number,
-        ticketNumberFormatted: appointment.ticket_number_formatted,
-      });
-    }
-    // Truly incompatible states → 409 (the kiosk shows a dedicated message).
-    if (appointment.status === "done" || appointment.status === "cancelled") {
-      return contractError(
-        "ALREADY_CHECKED_IN",
-        `Appointment is '${appointment.status}', check-in is not possible`,
+      // Idempotence: replaying the check-in of an already-checked-in (or later
+      // in-care) appointment returns the existing ticket with 200.
+      if (
+        appointment.status === "checkedIn" ||
+        appointment.status === "inCare"
+      ) {
+        return ok({
+          ticketNumber: appointment.ticket_number,
+          ticketNumberFormatted: appointment.ticket_number_formatted,
+        });
+      }
+      // Truly incompatible states → 409 (the kiosk shows a dedicated message).
+      if (appointment.status === "done" || appointment.status === "cancelled") {
+        return contractError(
+          "ALREADY_CHECKED_IN",
+          `Appointment is '${appointment.status}', check-in is not possible`,
+        );
+      }
+
+      // Ticket: ADOPT the kiosk's proposal (reserved on the ApiBorne server —
+      // already printed), else local numbering.
+      const proposed = body.proposedTicket;
+      const ticket =
+        proposed?.number && proposed.number > 0 && proposed.formattedNumber
+          ? {
+              number: proposed.number,
+              formatted: proposed.formattedNumber,
+              adopted: true,
+            }
+          : { ...nextLocalTicket(appointment.exam_type_id), adopted: false };
+      console.info(
+        `[contract] check-in appointment ${appointment.id}: ticket ${ticket.formatted} (${
+          ticket.adopted ? "proposedTicket adopted" : "local numbering"
+        })`,
       );
-    }
 
-    // Ticket: ADOPT the kiosk's proposal (reserved on the ApiBorne server —
-    // already printed), else local numbering.
-    const proposed = body.proposedTicket;
-    const ticket =
-      proposed?.number && proposed.number > 0 && proposed.formattedNumber
-        ? { number: proposed.number, formatted: proposed.formattedNumber, adopted: true }
-        : { ...nextLocalTicket(appointment.exam_type_id), adopted: false };
-    console.info(
-      `[contract] check-in appointment ${appointment.id}: ticket ${ticket.formatted} (${
-        ticket.adopted ? "proposedTicket adopted" : "local numbering"
-      })`,
-    );
+      setAppointmentCheckedIn(appointment.id, {
+        ticketNumber: ticket.number,
+        ticketNumberFormatted: ticket.formatted,
+        anomalyCodes: Array.isArray(body.anomalyCodes)
+          ? body.anomalyCodes
+          : null,
+        // Trace of the kiosk-reported "file complete/incomplete" flag (contract
+        // `documentsComplete`, nullable — null when the kiosk skipped documents).
+        documentsComplete:
+          typeof body.documentsComplete === "boolean"
+            ? body.documentsComplete
+            : null,
+      });
 
-    setAppointmentCheckedIn(appointment.id, {
-      ticketNumber: ticket.number,
-      ticketNumberFormatted: ticket.formatted,
-      anomalyCodes: Array.isArray(body.anomalyCodes) ? body.anomalyCodes : null,
-      // Trace of the kiosk-reported "file complete/incomplete" flag (contract
-      // `documentsComplete`, nullable — null when the kiosk skipped documents).
-      documentsComplete: typeof body.documentsComplete === "boolean" ? body.documentsComplete : null,
-    });
+      // Keep the ApiBorne server in sync (best-effort, fire-and-forget). For a
+      // kiosk check-in it already knows the ticket (reserve/confirm flow), so
+      // this only refreshes the status — idempotent on its side.
+      const updated = getAppointment(appointment.id);
+      if (updated) {
+        notifyAppointmentStatusChanged(updated, "checkedIn");
+      }
 
-    // Keep the ApiBorne server in sync (best-effort, fire-and-forget). For a
-    // kiosk check-in it already knows the ticket (reserve/confirm flow), so
-    // this only refreshes the status — idempotent on its side.
-    const updated = getAppointment(appointment.id);
-    if (updated) {
-      notifyAppointmentStatusChanged(updated, "checkedIn");
-    }
-
-    return ok({ ticketNumber: ticket.number, ticketNumberFormatted: ticket.formatted });
-  },
+      return ok({
+        ticketNumber: ticket.number,
+        ticketNumberFormatted: ticket.formatted,
+      });
+    },
+  ),
 );

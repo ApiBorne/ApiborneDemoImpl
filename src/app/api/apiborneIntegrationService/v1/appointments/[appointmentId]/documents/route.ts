@@ -18,6 +18,7 @@
  */
 import type { NextRequest } from "next/server";
 import { requireKioskAuth } from "@/server/contract/auth";
+import { withContractCrypto } from "@/server/contract/encryption";
 import { contractError, ok, withErrorBoundary } from "@/server/contract/errors";
 import { toContractDocument } from "@/server/contract/mappers";
 import { resolveAppointment } from "@/server/contract/resolve";
@@ -35,80 +36,110 @@ export { corsOptions as OPTIONS } from "@/server/contract/cors";
 const MAX_UPLOAD_BASE64_TOTAL_LENGTH = 15 * 1024 * 1024;
 
 export const GET = withErrorBoundary(
-  async (request: NextRequest, context: { params: Promise<{ appointmentId: string }> }) => {
-    const authError = requireKioskAuth(request);
-    if (authError) return authError;
+  withContractCrypto(
+    async (
+      request: NextRequest,
+      context: { params: Promise<{ appointmentId: string }> },
+    ) => {
+      const authError = requireKioskAuth(request);
+      if (authError) return authError;
 
-    const { appointmentId } = await context.params;
-    const appointment = resolveAppointment(appointmentId);
-    if (!appointment) {
-      return contractError("UNKNOWN_APPOINTMENT", `Appointment '${appointmentId}' not found`);
-    }
+      const { appointmentId } = await context.params;
+      const appointment = resolveAppointment(appointmentId);
+      if (!appointment) {
+        return contractError(
+          "UNKNOWN_APPOINTMENT",
+          `Appointment '${appointmentId}' not found`,
+        );
+      }
 
-    return ok({
-      documents: listDocuments(appointment.id).map(toContractDocument),
-      requiredDocumentTypes: requiredDocumentTypesOf(appointment).map((documentType) => ({
-        documentType,
-        label: documentTypeLabelOf(documentType),
-      })),
-    });
-  },
+      return ok({
+        documents: listDocuments(appointment.id).map(toContractDocument),
+        requiredDocumentTypes: requiredDocumentTypesOf(appointment).map(
+          (documentType) => ({
+            documentType,
+            label: documentTypeLabelOf(documentType),
+          }),
+        ),
+      });
+    },
+  ),
 );
 
 export const POST = withErrorBoundary(
-  async (request: NextRequest, context: { params: Promise<{ appointmentId: string }> }) => {
-    const authError = requireKioskAuth(request);
-    if (authError) return authError;
+  withContractCrypto(
+    async (
+      request: NextRequest,
+      context: { params: Promise<{ appointmentId: string }> },
+    ) => {
+      const authError = requireKioskAuth(request);
+      if (authError) return authError;
 
-    const { appointmentId } = await context.params;
-    const appointment = resolveAppointment(appointmentId);
-    if (!appointment) {
-      return contractError("UNKNOWN_APPOINTMENT", `Appointment '${appointmentId}' not found`);
-    }
+      const { appointmentId } = await context.params;
+      const appointment = resolveAppointment(appointmentId);
+      if (!appointment) {
+        return contractError(
+          "UNKNOWN_APPOINTMENT",
+          `Appointment '${appointmentId}' not found`,
+        );
+      }
 
-    const body = (await request.json().catch(() => null)) as {
-      documentType?: string;
-      label?: string;
-      rotationAngle?: number;
-      pages?: { contentBase64?: string; mimeType?: string }[];
-    } | null;
-    if (!body?.documentType) {
-      return contractError("VALIDATION_ERROR", "documentType is required", {
-        field: "documentType",
-      });
-    }
-    const pages = Array.isArray(body.pages) ? body.pages : [];
-    if (pages.length === 0 || pages.some((p) => !p.contentBase64 || !p.mimeType)) {
-      return contractError(
-        "VALIDATION_ERROR",
-        "pages must be a non-empty array of { contentBase64, mimeType }",
-        { field: "pages" },
+      const body = (await request.json().catch(() => null)) as {
+        documentType?: string;
+        label?: string;
+        rotationAngle?: number;
+        pages?: { contentBase64?: string; mimeType?: string }[];
+      } | null;
+      if (!body?.documentType) {
+        return contractError("VALIDATION_ERROR", "documentType is required", {
+          field: "documentType",
+        });
+      }
+      const pages = Array.isArray(body.pages) ? body.pages : [];
+      if (
+        pages.length === 0 ||
+        pages.some((p) => !p.contentBase64 || !p.mimeType)
+      ) {
+        return contractError(
+          "VALIDATION_ERROR",
+          "pages must be a non-empty array of { contentBase64, mimeType }",
+          { field: "pages" },
+        );
+      }
+      const totalBase64Length = pages.reduce(
+        (sum, p) => sum + (p.contentBase64?.length ?? 0),
+        0,
       );
-    }
-    const totalBase64Length = pages.reduce((sum, p) => sum + (p.contentBase64?.length ?? 0), 0);
-    if (totalBase64Length > MAX_UPLOAD_BASE64_TOTAL_LENGTH) {
-      return contractError("UPLOAD_TOO_LARGE", `Upload exceeds ${MAX_UPLOAD_BASE64_TOTAL_LENGTH} base64 chars`);
-    }
+      if (totalBase64Length > MAX_UPLOAD_BASE64_TOTAL_LENGTH) {
+        return contractError(
+          "UPLOAD_TOO_LARGE",
+          `Upload exceeds ${MAX_UPLOAD_BASE64_TOTAL_LENGTH} base64 chars`,
+        );
+      }
 
-    const document = createDocument({
-      appointmentId: appointment.id,
-      documentType: body.documentType,
-      label: body.label ?? null,
-      rotationAngle: body.rotationAngle ?? 0,
-      pages: pages as { contentBase64: string; mimeType: string }[],
-    });
+      const document = createDocument({
+        appointmentId: appointment.id,
+        documentType: body.documentType,
+        label: body.label ?? null,
+        rotationAngle: body.rotationAngle ?? 0,
+        pages: pages as { contentBase64: string; mimeType: string }[],
+      });
 
-    // Fake prescription analysis: a real editor would OCR the pages. Proposing
-    // known practitioners exercises the kiosk's prescriber-picker flow.
-    const analysis =
-      body.documentType === "prescription"
-        ? {
-            prescriberProposals: listPractitioners()
-              .slice(0, 2)
-              .map((p) => ({ name: p.full_name, rppsId: p.rpps_id })),
-          }
-        : undefined;
+      // Fake prescription analysis: a real editor would OCR the pages. Proposing
+      // known practitioners exercises the kiosk's prescriber-picker flow.
+      const analysis =
+        body.documentType === "prescription"
+          ? {
+              prescriberProposals: listPractitioners()
+                .slice(0, 2)
+                .map((p) => ({ name: p.full_name, rppsId: p.rpps_id })),
+            }
+          : undefined;
 
-    return ok({ documentId: String(document.id), ...(analysis ? { analysis } : {}) }, 201);
-  },
+      return ok(
+        { documentId: String(document.id), ...(analysis ? { analysis } : {}) },
+        201,
+      );
+    },
+  ),
 );

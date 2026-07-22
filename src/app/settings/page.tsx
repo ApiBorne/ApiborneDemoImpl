@@ -21,6 +21,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import * as api from "@/lib/api/client";
 
 export default function SettingsPage() {
@@ -43,6 +45,8 @@ export default function SettingsPage() {
         licenceUuid: s.licenceUuid ?? "",
         apiborneServerBaseUrl: s.apiborneServerBaseUrl ?? "",
         pushEnabled: s.pushEnabled ?? "true",
+        contractEncryptionPrivateKeys: s.contractEncryptionPrivateKeys ?? "",
+        requireEncryption: s.requireEncryption ?? "false",
       });
     }
   }, [settingsQuery.data]);
@@ -114,6 +118,59 @@ export default function SettingsPage() {
               checked={values.pushEnabled !== "false"}
               onCheckedChange={(checked) =>
                 setValues((v) => ({ ...v, pushEnabled: checked ? "true" : "false" }))
+              }
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            End-to-end encryption
+            {(values.contractEncryptionPrivateKeys ?? "").includes("PRIVATE KEY") ? (
+              <Badge>encryption active</Badge>
+            ) : (
+              <Badge variant="outline">off</Badge>
+            )}
+          </CardTitle>
+          <CardDescription>
+            Optional contract feature: the kiosk encrypts every communication call with a fresh
+            AES-256-GCM session key wrapped with YOUR public key (RSA-OAEP-SHA256) — the ApiBorne
+            server never sees patient data. Generate a key pair with{" "}
+            <code>npm run keys:generate</code>: it stores the private key below and prints the
+            public key to paste in the ApiBorne admin (Connectivity page). The private key NEVER
+            leaves this editor.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Private key(s) — PEM, newest first (rotation)</Label>
+            <Textarea
+              value={values.contractEncryptionPrivateKeys ?? ""}
+              onChange={(e) =>
+                setValues((v) => ({ ...v, contractEncryptionPrivateKeys: e.target.value }))
+              }
+              placeholder="-----BEGIN PRIVATE KEY-----&#10;… (npm run keys:generate fills this)"
+              className="min-h-32 font-mono text-xs"
+            />
+            <p className="text-muted-foreground text-xs">
+              Several concatenated PEM blocks are allowed: each is tried when unwrapping a session
+              key, so old kiosk configurations keep working during a rotation. Clear the field to
+              disable encrypted calls.
+            </p>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>Require encryption (strict mode)</Label>
+              <p className="text-muted-foreground text-xs">
+                Reject clear-text communication calls with 400 ENCRYPTION_REQUIRED.
+              </p>
+            </div>
+            <Switch
+              checked={values.requireEncryption === "true"}
+              onCheckedChange={(checked) =>
+                setValues((v) => ({ ...v, requireEncryption: checked ? "true" : "false" }))
               }
             />
           </div>

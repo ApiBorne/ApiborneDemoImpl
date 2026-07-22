@@ -171,7 +171,49 @@ it identifies the target licence UNAMBIGUOUSLY, since several licences can
 share one brand/key. The office identity (`officeId`, `officeVisibleId`,
 `brandId`) stays in the payload as the compatibility fallback.
 
-## 4. Test checklist
+## 4. End-to-end encryption (optional contract feature)
+
+The contract lets an establishment encrypt the kiosk↔editor channel above
+TLS, with a key pair ONLY the editor can decrypt (the ApiBorne server relays
+blindly — zero-knowledge). Full protocol: `contract/openapi.yaml`, section
+« Chiffrement de bout en bout » + schema `EncryptedEnvelope`.
+
+What this demo implements (copy it):
+
+- [`encryption.ts`](../src/server/contract/encryption.ts) — the whole
+  protocol in `node:crypto`: private-key parsing with rotation (several
+  concatenated PEMs, each tried at unwrap), RSA-OAEP-SHA256 session-key
+  unwrap, AES-256-GCM envelope decrypt (128-bit tag CONCATENATED after the
+  ciphertext — WebCrypto convention), and 2xx response sealing with the SAME
+  session key and a FRESH IV.
+- `withContractCrypto(handler)` wraps the **10 communication routes only**
+  (never `/config/*`, `staff/sign-in` or `PUT status`). Auth runs BEFORE any
+  decryption (don't be a decryption oracle), errors stay in CLEAR, and a
+  clear body under encryption headers is rejected (`DECRYPTION_FAILED`,
+  anti-downgrade).
+- [`cors.ts`](../src/server/contract/cors.ts) — `X-Kiosk-Encryption` and
+  `X-Kiosk-Encryption-Key` added to `Access-Control-Allow-Headers`, and
+  `Access-Control-Expose-Headers: X-Kiosk-Encryption`. Forgetting this fails
+  the browser preflight SILENTLY.
+
+Tooling:
+
+- `npm run keys:generate` — RSA-4096 pair; stores the private key in the
+  demo settings (newest first — rotation) and prints the public key to paste
+  in the ApiBorne admin (Connectivity page). Order matters: private key
+  deployed on the editor FIRST, public key pasted in the admin AFTER.
+- `npm run encrypted-curl -- POST /patients/identify '{"criteria":…}'` — a
+  kiosk-equivalent test oracle: encrypts, calls, decrypts. Flags:
+  `--url` (point it at YOUR implementation), `--public-key <pem>`,
+  `--corrupt-tag` (your editor must answer `400 DECRYPTION_FAILED`),
+  `--plain` (compat check: no headers → clear round-trip).
+- `/settings` — paste/rotate private keys, strict mode (reject clear calls),
+  "encryption active" badge.
+
+Sizing note: the 10 MB upload minimum is on the CLEAR JSON; the encrypted
+transport adds ~35 % (base64) — raise your HTTP body limit accordingly.
+
+## 5. Test checklist
 
 Run these against your implementation (all pass against this demo):
 
@@ -184,3 +226,6 @@ Run these against your implementation (all pass against this demo):
 - [ ] document upload > your limit → `413 UPLOAD_TOO_LARGE`
 - [ ] `PUT status` backward (inCare → checkedIn) → `200` without effect
 - [ ] `staff/sign-in` with bad credentials → `401 INVALID_CREDENTIALS`
+- [ ] encryption on: encrypted `identify`/upload → `200/201` encrypted
+      responses; corrupted tag → `400 DECRYPTION_FAILED`; no headers →
+      clear round-trip (unless strict mode)

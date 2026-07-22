@@ -26,6 +26,14 @@ export const ERROR_CODES = {
   UNKNOWN_DOCUMENT: 404,
   ALREADY_CHECKED_IN: 409,
   UPLOAD_TOO_LARGE: 413,
+  // End-to-end encryption (contract "Chiffrement de bout en bout"): the
+  // envelope cannot be decrypted (unknown key, bad tag, malformed) — the
+  // kiosk never retries and NEVER falls back to clear text.
+  DECRYPTION_FAILED: 400,
+  // Demo-only strict mode (`requireEncryption` setting): reject clear-text
+  // calls on communication routes. Not a contract code — a real editor may
+  // enforce the same policy with any 400.
+  ENCRYPTION_REQUIRED: 400,
   INTERNAL_ERROR: 500,
   NOT_SUPPORTED: 501,
 } as const;

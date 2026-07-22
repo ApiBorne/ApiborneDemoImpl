@@ -34,6 +34,10 @@ src/
       auth.ts                 2-header auth, validation order, key-only variant
       errors.ts               Normalized {error:{code,message,details}} + statuses
       cors.ts                 CORS headers + shared OPTIONS handler
+      encryption.ts           Optional end-to-end encryption (AES-256-GCM +
+                              RSA-OAEP-SHA256), withContractCrypto wrapper on
+                              the 10 communication routes; keys:generate /
+                              encrypted-curl scripts
       mappers.ts              SQLite rows -> contract DTOs, "{id}~{visibleId}" ids,
                               vendorData round-trip
       resolve.ts              Appointment resolution + AppointmentDetail shape

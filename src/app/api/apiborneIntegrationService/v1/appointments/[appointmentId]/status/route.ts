@@ -13,32 +13,52 @@ import { requireAuthKey } from "@/server/contract/auth";
 import { contractError, ok, withErrorBoundary } from "@/server/contract/errors";
 import { resolveAppointment } from "@/server/contract/resolve";
 import { notifyAppointmentStatusChanged } from "@/server/apiborne/client";
-import { getAppointment, updateAppointmentStatus } from "@/server/db/repositories";
+import {
+  getAppointment,
+  updateAppointmentStatus,
+} from "@/server/db/repositories";
 import type { AppointmentStatus } from "@/server/db/types";
 
 export { corsOptions as OPTIONS } from "@/server/contract/cors";
 
 /** Forward progression order — index comparison implements "never backward". */
-const FORWARD_ORDER: AppointmentStatus[] = ["scheduled", "checkedIn", "inCare", "done"];
+const FORWARD_ORDER: AppointmentStatus[] = [
+  "scheduled",
+  "checkedIn",
+  "inCare",
+  "done",
+];
 const ALLOWED_TARGETS: AppointmentStatus[] = ["checkedIn", "inCare", "done"];
 
 export const PUT = withErrorBoundary(
-  async (request: NextRequest, context: { params: Promise<{ appointmentId: string }> }) => {
+  async (
+    request: NextRequest,
+    context: { params: Promise<{ appointmentId: string }> },
+  ) => {
     const authError = requireAuthKey(request);
     if (authError) return authError;
 
     const { appointmentId } = await context.params;
     const appointment = resolveAppointment(appointmentId);
     if (!appointment) {
-      return contractError("UNKNOWN_APPOINTMENT", `Appointment '${appointmentId}' not found`);
+      return contractError(
+        "UNKNOWN_APPOINTMENT",
+        `Appointment '${appointmentId}' not found`,
+      );
     }
 
-    const body = (await request.json().catch(() => null)) as { status?: string } | null;
+    const body = (await request.json().catch(() => null)) as {
+      status?: string;
+    } | null;
     const target = body?.status as AppointmentStatus | undefined;
     if (!target || !ALLOWED_TARGETS.includes(target)) {
-      return contractError("VALIDATION_ERROR", "status must be one of checkedIn|inCare|done", {
-        field: "status",
-      });
+      return contractError(
+        "VALIDATION_ERROR",
+        "status must be one of checkedIn|inCare|done",
+        {
+          field: "status",
+        },
+      );
     }
 
     if (appointment.status === "cancelled") {

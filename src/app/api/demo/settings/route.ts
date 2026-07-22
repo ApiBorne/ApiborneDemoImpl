@@ -23,6 +23,8 @@ const EDITABLE_KEYS: SettingKey[] = [
   "apiborneServerBaseUrl",
   "pushEnabled",
   "enforceKnownDevices",
+  "contractEncryptionPrivateKeys",
+  "requireEncryption",
 ];
 
 export function GET(): NextResponse {

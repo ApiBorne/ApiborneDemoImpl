@@ -22,7 +22,12 @@
  */
 import type { NextRequest } from "next/server";
 import type { NextResponse } from "next/server";
-import { getSetting, isKnownDevice, registerDevice, setSetting } from "@/server/db/repositories";
+import {
+  getSetting,
+  isKnownDevice,
+  registerDevice,
+  setSetting,
+} from "@/server/db/repositories";
 import { contractError } from "./errors";
 
 /**
@@ -44,7 +49,10 @@ export function requireKioskAuth(request: NextRequest): NextResponse | null {
   }
   if (!isKnownDevice(deviceId)) {
     if (getSetting("enforceKnownDevices") === "true") {
-      return contractError("UNKNOWN_DEVICE", `Unknown kiosk device '${deviceId}'`);
+      return contractError(
+        "UNKNOWN_DEVICE",
+        `Unknown kiosk device '${deviceId}'`,
+      );
     }
     // Lenient: validate the key FIRST, then remember the device.
     const keyError = requireAuthKey(request);
@@ -76,11 +84,16 @@ export function requireAuthKey(request: NextRequest): NextResponse | null {
   const expected = getSetting("kioskAuthKey");
   if (!expected) {
     setSetting("kioskAuthKey", authKey);
-    console.info("[contract] auth key captured on first use (trust-on-first-use)");
+    console.info(
+      "[contract] auth key captured on first use (trust-on-first-use)",
+    );
     return null;
   }
   if (authKey !== expected) {
-    return contractError("INVALID_AUTH_KEY", "Invalid authorization key for this device");
+    return contractError(
+      "INVALID_AUTH_KEY",
+      "Invalid authorization key for this device",
+    );
   }
   return null;
 }
