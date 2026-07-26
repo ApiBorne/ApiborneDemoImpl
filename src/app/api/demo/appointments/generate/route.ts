@@ -49,6 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         patientId: pick(patients).id,
         practitionerId: pick(practitioners).id,
         roomId: pick(rooms).id,
+        officePlaceId: null,
         examTypeId: examType.id,
         examLabel: typeExams.length > 0 ? pick(typeExams).name : examType.name,
         startDate: start.toISOString(),

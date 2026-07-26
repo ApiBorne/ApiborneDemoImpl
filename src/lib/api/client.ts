@@ -55,6 +55,8 @@ export interface UiAppointment {
   patientName: string;
   practitionerId: number;
   roomId: number | null;
+  /** Site of the appointment (office place id); null = single-site legacy. */
+  officePlaceId: number | null;
   examTypeId: number;
   examLabel: string;
   startDate: string;
@@ -145,6 +147,7 @@ export function createAppointment(data: {
   patientId: number;
   practitionerId: number;
   roomId: number | null;
+  officePlaceId: number | null;
   examTypeId: number;
   examLabel: string;
   startDate: string;
@@ -159,6 +162,7 @@ export function updateAppointment(
     patientId: number;
     practitionerId: number;
     roomId: number | null;
+    officePlaceId: number | null;
     examTypeId: number;
     examLabel: string;
     startDate: string;

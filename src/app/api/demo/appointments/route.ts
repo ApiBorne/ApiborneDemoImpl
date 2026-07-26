@@ -25,6 +25,7 @@ export function toUiAppointment(a: AppointmentRow) {
     patientName: patient ? `${patient.first_name} ${patient.last_name}` : "?",
     practitionerId: a.practitioner_id,
     roomId: a.room_id,
+    officePlaceId: a.office_place_id,
     examTypeId: a.exam_type_id,
     examLabel: a.exam_label,
     startDate: a.start_date,
@@ -56,6 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     patientId?: number;
     practitionerId?: number;
     roomId?: number | null;
+    officePlaceId?: number | null;
     examTypeId?: number;
     examLabel?: string;
     startDate?: string;
@@ -72,6 +74,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     patientId: body.patientId,
     practitionerId: body.practitionerId,
     roomId: body.roomId ?? null,
+    officePlaceId: body.officePlaceId ?? null,
     examTypeId: body.examTypeId,
     examLabel: body.examLabel || examType?.name || "EXAM",
     startDate: body.startDate,

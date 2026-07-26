@@ -70,11 +70,13 @@ export function requireKioskAuth(request: NextRequest): NextResponse | null {
  * Auth-key-only check (staff/sign-in, PUT status — server-to-server calls).
  *
  * The shared key IS the ApiBorne `brandAuthorizationKey`, already defined in
- * the ApiBorne admin (Connectivity page). To avoid copying it by hand, the
- * demo supports TRUST-ON-FIRST-USE: when no key is configured yet, the key
- * presented by the FIRST caller is captured and becomes the expected key
- * (visible/editable in /settings, also reused for the outbound pushes).
- * A production editor should of course provision the key explicitly.
+ * the ApiBorne admin (Connectivity page). DEMO POLICY: the licence identity
+ * rests on the ApiBorne licence UUID (settings page) — the shared key is
+ * captured from the first caller and then FOLLOWS the latest key presented
+ * (a licence switching its KioskReactor company rotates the key; pinning the
+ * old one would lock the demo out with no UI to fix it). The captured key is
+ * reused for the outbound pushes. A production editor should of course
+ * provision the key explicitly and reject mismatches.
  */
 export function requireAuthKey(request: NextRequest): NextResponse | null {
   const authKey = request.headers.get("x-kiosk-auth-key");
@@ -90,10 +92,11 @@ export function requireAuthKey(request: NextRequest): NextResponse | null {
     return null;
   }
   if (authKey !== expected) {
-    return contractError(
-      "INVALID_AUTH_KEY",
-      "Invalid authorization key for this device",
-    );
+    // Rotation demo-grade : la nouvelle clé remplace l'ancienne (changement de
+    // company KioskReactor côté ApiBorne) — l'identité de la licence est
+    // portée par son UUID, pas par la clé.
+    setSetting("kioskAuthKey", authKey);
+    console.info("[contract] auth key rotated (new key captured)");
   }
   return null;
 }

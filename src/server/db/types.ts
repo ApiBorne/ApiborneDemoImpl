@@ -73,6 +73,8 @@ export interface AppointmentRow {
   practitioner_id: number;
   room_id: number | null;
   exam_type_id: number;
+  /** Site of the appointment; NULL = first office place (single-site legacy). */
+  office_place_id: number | null;
   exam_label: string;
   start_date: string;
   duration_minutes: number;
@@ -131,6 +133,6 @@ export type SettingKey =
   | "pushEnabled"
   | "enforceKnownDevices"
   // End-to-end encryption: one or more concatenated private key PEMs (newest
-  // first — rotation), and the strict mode rejecting clear-text calls.
-  | "contractEncryptionPrivateKeys"
-  | "requireEncryption";
+  // first — rotation). Strict mode is automatic: clear-text is rejected as
+  // soon as a key is configured.
+  | "contractEncryptionPrivateKeys";

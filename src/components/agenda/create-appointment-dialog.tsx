@@ -30,6 +30,7 @@ import type {
   UiAppointment,
   UiExam,
   UiExamType,
+  UiOfficePlace,
   UiPatient,
   UiPractitioner,
   UiRoom,
@@ -45,6 +46,8 @@ export interface AppointmentDraft {
   patientId: number;
   practitionerId: number;
   roomId: number | null;
+  /** Site of the appointment — feeds the contract `locationId` (wrong-site control). */
+  officePlaceId: number | null;
   examTypeId: number;
   examLabel: string;
   startDate: string;
@@ -58,6 +61,7 @@ export function CreateAppointmentDialog({
   patients,
   practitioners,
   rooms,
+  officePlaces,
   examTypes,
   exams,
   onClose,
@@ -71,6 +75,7 @@ export function CreateAppointmentDialog({
   patients: UiPatient[];
   practitioners: UiPractitioner[];
   rooms: UiRoom[];
+  officePlaces: UiOfficePlace[];
   examTypes: UiExamType[];
   exams: UiExam[];
   onClose: () => void;
@@ -82,6 +87,7 @@ export function CreateAppointmentDialog({
   const [examTypeId, setExamTypeId] = useState<string>("");
   const [examId, setExamId] = useState<string>("");
   const [roomId, setRoomId] = useState<string>("");
+  const [officePlaceId, setOfficePlaceId] = useState<string>("");
   const [examLabel, setExamLabel] = useState("");
   const [time, setTime] = useState("09:00");
   const [duration, setDuration] = useState("20");
@@ -95,6 +101,7 @@ export function CreateAppointmentDialog({
       setExamTypeId("");
       setExamId("");
       setRoomId("");
+      setOfficePlaceId("");
       setExamLabel("");
       setDuration("20");
     }
@@ -112,6 +119,7 @@ export function CreateAppointmentDialog({
       setExamTypeId(String(editing.examTypeId));
       setExamId("");
       setRoomId(editing.roomId != null ? String(editing.roomId) : "");
+      setOfficePlaceId(editing.officePlaceId != null ? String(editing.officePlaceId) : "");
       setExamLabel(editing.examLabel);
       setDuration(String(editing.durationMinutes));
     }
@@ -134,6 +142,7 @@ export function CreateAppointmentDialog({
       patientId: Number(patientId),
       practitionerId: Number(practitionerId),
       roomId: roomId ? Number(roomId) : null,
+      officePlaceId: officePlaceId ? Number(officePlaceId) : null,
       examTypeId: Number(examTypeId),
       examLabel: examLabel || examType?.name || "EXAM",
       startDate: startDate.toISOString(),
@@ -227,6 +236,26 @@ export function CreateAppointmentDialog({
               </Select>
             </div>
           </div>
+          {/* Site du RDV : alimente `locationId` du contrat — c'est lui que la
+              borne compare à son lieu pour le contrôle « mauvais site ».
+              Vide = premier site du référentiel (mono-site historique). */}
+          {officePlaces.length > 1 && (
+            <div className="space-y-1.5">
+              <Label>Location (site)</Label>
+              <Select value={officePlaceId} onValueChange={setOfficePlaceId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={`Default — ${officePlaces[0]?.name ?? ""}`} />
+                </SelectTrigger>
+                <SelectContent>
+                  {officePlaces.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {typeExams.length > 0 && (
             <div className="space-y-1.5">
               <Label>Exam</Label>

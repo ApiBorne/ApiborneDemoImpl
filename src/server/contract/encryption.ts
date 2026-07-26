@@ -225,8 +225,10 @@ async function openEnvelope(
 /**
  * Wraps a COMMUNICATION route handler with the end-to-end encryption protocol.
  *
- *  - No encryption headers → pass through untouched (opt-in compatibility),
- *    unless the strict `requireEncryption` setting is on (→ 400).
+ *  - No encryption headers → 400 ENCRYPTION_REQUIRED as soon as private keys
+ *    are configured (encryption is MANDATORY for any active ApiBorne
+ *    integration — no opt-out); pass through in clear only while no key is
+ *    provisioned yet.
  *  - Encryption headers present → auth FIRST (never act as a decryption
  *    oracle for unauthenticated callers), then decrypt the request, run the
  *    handler on the clear body, and re-seal 2xx JSON responses (same session
@@ -246,7 +248,10 @@ export function withContractCrypto<Args extends unknown[]>(
     const wrappedKey = request.headers.get("x-kiosk-encryption-key");
 
     if (!version && !wrappedKey) {
-      if (getSetting("requireEncryption") === "true") {
+      // Strict mode is MANDATORY: as soon as private keys are configured,
+      // clear-text communication calls are rejected — encryption is required
+      // for any active ApiBorne integration, there is no opt-out toggle.
+      if (isEncryptionConfigured()) {
         return contractError(
           "ENCRYPTION_REQUIRED",
           "This editor requires end-to-end encryption (missing X-Kiosk-Encryption headers)",

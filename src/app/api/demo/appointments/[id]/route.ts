@@ -18,6 +18,7 @@ export async function PUT(
     patientId?: number;
     practitionerId?: number;
     roomId?: number | null;
+    officePlaceId?: number | null;
     examTypeId?: number;
     examLabel?: string;
     startDate?: string;
@@ -41,6 +42,7 @@ export async function PUT(
     patientId: body.patientId,
     practitionerId: body.practitionerId,
     roomId: body.roomId ?? null,
+    officePlaceId: body.officePlaceId ?? null,
     examTypeId: body.examTypeId,
     examLabel: body.examLabel || examType?.name || "EXAM",
     startDate: body.startDate,

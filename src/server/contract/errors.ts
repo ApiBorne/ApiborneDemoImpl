@@ -30,9 +30,9 @@ export const ERROR_CODES = {
   // envelope cannot be decrypted (unknown key, bad tag, malformed) — the
   // kiosk never retries and NEVER falls back to clear text.
   DECRYPTION_FAILED: 400,
-  // Demo-only strict mode (`requireEncryption` setting): reject clear-text
-  // calls on communication routes. Not a contract code — a real editor may
-  // enforce the same policy with any 400.
+  // Strict mode (automatic as soon as private keys are configured): reject
+  // clear-text calls on communication routes. Not a contract code — a real
+  // editor may enforce the same policy with any 400.
   ENCRYPTION_REQUIRED: 400,
   INTERNAL_ERROR: 500,
   NOT_SUPPORTED: 501,

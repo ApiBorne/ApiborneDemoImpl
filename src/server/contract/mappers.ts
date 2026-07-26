@@ -89,11 +89,18 @@ export function toContractPatient(patient: PatientRow) {
 }
 
 export function toContractAppointment(appointment: AppointmentRow) {
-  // Lieu du RDV : les RDV de la démo ne sont pas rattachés individuellement à
-  // un lieu — on expose le premier site du référentiel office_places (démo
-  // mono-site par défaut). C'est lui qui alimente le contrôle « mauvais
-  // lieu » de la borne (id partagé avec les lieux configurés sur la borne).
-  const mainPlace = listOfficePlaces()[0] ?? null;
+  // Lieu du RDV : le site affecté au RDV (dialog de l'agenda) quand il existe,
+  // sinon le premier site du référentiel office_places (comportement mono-site
+  // historique, et RDV créés avant la colonne). C'est lui qui alimente le
+  // contrôle « mauvais lieu » de la borne (id partagé avec les lieux
+  // configurés côté ApiBorne).
+  const places = listOfficePlaces();
+  const mainPlace =
+    (appointment.office_place_id != null
+      ? places.find((p) => p.id === appointment.office_place_id)
+      : null) ??
+    places[0] ??
+    null;
   // Examen : le RDV démo ne stocke que le libellé — on résout l'id du
   // référentiel exams par nom (dans le bon type) pour que les conditions
   // « par examen » de la borne (messages patient, critères) matchent les ids

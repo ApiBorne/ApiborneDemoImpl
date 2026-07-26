@@ -55,6 +55,10 @@ export function getDb(): Database.Database {
   if (!appointmentColumns.some((column) => column.name === "checkin_documents_complete")) {
     db.exec("ALTER TABLE appointments ADD COLUMN checkin_documents_complete INTEGER");
   }
+  // Backfill for databases created before the per-appointment office place
+  if (!appointmentColumns.some((column) => column.name === "office_place_id")) {
+    db.exec("ALTER TABLE appointments ADD COLUMN office_place_id INTEGER REFERENCES office_places(id)");
+  }
   // Backfill for databases created before the kiosk-editable patient fields
   // (contract PATCH /patients/{id}): mobile phone, address line2, biometry,
   // referring practitioner. mobile_phone starts from the seeded `phone`.

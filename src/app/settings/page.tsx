@@ -46,7 +46,6 @@ export default function SettingsPage() {
         apiborneServerBaseUrl: s.apiborneServerBaseUrl ?? "",
         pushEnabled: s.pushEnabled ?? "true",
         contractEncryptionPrivateKeys: s.contractEncryptionPrivateKeys ?? "",
-        requireEncryption: s.requireEncryption ?? "false",
       });
     }
   }, [settingsQuery.data]);
@@ -156,23 +155,16 @@ export default function SettingsPage() {
             />
             <p className="text-muted-foreground text-xs">
               Several concatenated PEM blocks are allowed: each is tried when unwrapping a session
-              key, so old kiosk configurations keep working during a rotation. Clear the field to
-              disable encrypted calls.
+              key, so old kiosk configurations keep working during a rotation.
             </p>
           </div>
-          <div className="flex items-center justify-between">
-            <div>
-              <Label>Require encryption (strict mode)</Label>
-              <p className="text-muted-foreground text-xs">
-                Reject clear-text communication calls with 400 ENCRYPTION_REQUIRED.
-              </p>
-            </div>
-            <Switch
-              checked={values.requireEncryption === "true"}
-              onCheckedChange={(checked) =>
-                setValues((v) => ({ ...v, requireEncryption: checked ? "true" : "false" }))
-              }
-            />
+          <div>
+            <Label>Encryption is mandatory</Label>
+            <p className="text-muted-foreground text-xs">
+              As soon as a private key is configured, clear-text communication calls are rejected
+              with 400 ENCRYPTION_REQUIRED — encryption is required for any active ApiBorne
+              integration, there is no opt-out.
+            </p>
           </div>
         </CardContent>
       </Card>

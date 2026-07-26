@@ -169,6 +169,7 @@ export function updateAppointment(
     patientId: number;
     practitionerId: number;
     roomId: number | null;
+    officePlaceId: number | null;
     examTypeId: number;
     examLabel: string;
     startDate: string;
@@ -178,7 +179,7 @@ export function updateAppointment(
   getDb()
     .prepare(
       `UPDATE appointments
-       SET patient_id = ?, practitioner_id = ?, room_id = ?, exam_type_id = ?,
+       SET patient_id = ?, practitioner_id = ?, room_id = ?, office_place_id = ?, exam_type_id = ?,
            exam_label = ?, start_date = ?, duration_minutes = ?
        WHERE id = ?`,
     )
@@ -186,6 +187,7 @@ export function updateAppointment(
       data.patientId,
       data.practitionerId,
       data.roomId,
+      data.officePlaceId,
       data.examTypeId,
       data.examLabel,
       data.startDate,
@@ -500,6 +502,42 @@ export function getAppointmentByVisibleId(visibleId: string): AppointmentRow | u
     | undefined;
 }
 
+/**
+ * Résout un RDV du jour par son numéro de ticket (émis au check-in), SCOPÉ au
+ * lieu (officePlaceId) — le numéro de ticket est recyclé par lieu. Le code
+ * scanné/saisi côté Pass peut être le numéro brut (`2`) OU le formaté (`RA-2`) :
+ * on essaie les deux colonnes. Scopé au jour courant. Renvoie le plus récent en
+ * cas d'égalité improbable.
+ */
+export function getAppointmentByTicketOnDay(
+  ticket: string,
+  officePlaceId: number,
+  dayStart: Date,
+  dayEnd: Date,
+): AppointmentRow | undefined {
+  const trimmed = ticket.trim();
+  const numeric = Number(trimmed.replace(/\D+/g, ""));
+  // Filtre lieu TOLÉRANT au null : cet éditeur de démo est mono-lieu et ne
+  // rattache pas forcément ses RDV à un officePlace (office_place_id NULL). On
+  // ne rejette donc pas ces RDV — le lieu ne restreint que les RDV qui EN ONT un.
+  return getDb()
+    .prepare(
+      `SELECT * FROM appointments
+       WHERE start_date >= ? AND start_date < ?
+         AND (office_place_id IS NULL OR office_place_id = ?)
+         AND (ticket_number_formatted = ? OR (ticket_number IS NOT NULL AND ticket_number = ?))
+       ORDER BY checked_in_at DESC
+       LIMIT 1`,
+    )
+    .get(
+      dayStart.toISOString(),
+      dayEnd.toISOString(),
+      officePlaceId,
+      trimmed,
+      Number.isNaN(numeric) ? null : numeric,
+    ) as AppointmentRow | undefined;
+}
+
 /** Appointments of one calendar day (local), for the agenda and identify. */
 export function listAppointmentsOfDay(dayStart: Date, dayEnd: Date): AppointmentRow[] {
   return getDb()
@@ -529,6 +567,7 @@ export function createAppointment(data: {
   patientId: number;
   practitionerId: number;
   roomId: number | null;
+  officePlaceId: number | null;
   examTypeId: number;
   examLabel: string;
   startDate: string;
@@ -536,14 +575,15 @@ export function createAppointment(data: {
 }): AppointmentRow {
   const result = getDb()
     .prepare(
-      `INSERT INTO appointments (visible_id, patient_id, practitioner_id, room_id, exam_type_id, exam_label, start_date, duration_minutes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')`,
+      `INSERT INTO appointments (visible_id, patient_id, practitioner_id, room_id, office_place_id, exam_type_id, exam_label, start_date, duration_minutes, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled')`,
     )
     .run(
       newVisibleId(),
       data.patientId,
       data.practitionerId,
       data.roomId,
+      data.officePlaceId,
       data.examTypeId,
       data.examLabel,
       data.startDate,

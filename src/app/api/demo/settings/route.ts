@@ -24,7 +24,6 @@ const EDITABLE_KEYS: SettingKey[] = [
   "pushEnabled",
   "enforceKnownDevices",
   "contractEncryptionPrivateKeys",
-  "requireEncryption",
 ];
 
 export function GET(): NextResponse {

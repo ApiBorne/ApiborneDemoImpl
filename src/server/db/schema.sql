@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS appointments (
   practitioner_id          INTEGER NOT NULL REFERENCES practitioners(id),
   room_id                  INTEGER REFERENCES rooms(id),
   exam_type_id             INTEGER NOT NULL REFERENCES exam_types(id),
+  -- Site (office place) where the appointment takes place. NULL = first place
+  -- of the referential (historical single-site behaviour). Exposed on the
+  -- contract as `locationId` -- feeds the kiosk's "wrong site" control.
+  office_place_id          INTEGER REFERENCES office_places(id),
   exam_label               TEXT NOT NULL,         -- displayable exam label
   start_date               TEXT NOT NULL,         -- ISO 8601 with offset
   duration_minutes         INTEGER NOT NULL DEFAULT 20,

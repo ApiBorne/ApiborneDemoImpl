@@ -95,14 +95,16 @@ export const POST = withErrorBoundary(
           field: "documentType",
         });
       }
-      const pages = Array.isArray(body.pages) ? body.pages : [];
-      if (
-        pages.length === 0 ||
-        pages.some((p) => !p.contentBase64 || !p.mimeType)
-      ) {
+      // mimeType est OPTIONNEL au contrat (défaut image/jpeg) : on n'exige que
+      // contentBase64 et on complète le mimeType manquant.
+      const pages = (Array.isArray(body.pages) ? body.pages : []).map((p) => ({
+        contentBase64: p?.contentBase64,
+        mimeType: p?.mimeType ?? "image/jpeg",
+      }));
+      if (pages.length === 0 || pages.some((p) => !p.contentBase64)) {
         return contractError(
           "VALIDATION_ERROR",
-          "pages must be a non-empty array of { contentBase64, mimeType }",
+          "pages must be a non-empty array of { contentBase64 }",
           { field: "pages" },
         );
       }

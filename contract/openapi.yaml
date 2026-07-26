@@ -224,6 +224,8 @@ tags:
     description: Consultation des rendez-vous, prescripteur, check-in
   - name: documents
     description: Documents attachés à un rendez-vous
+  - name: preparatorySurvey
+    description: Questionnaire préparatoire d'un rendez-vous (OPTIONNEL)
   - name: staff
     description: Authentification du personnel d'accueil (Cockpit)
 
@@ -305,6 +307,40 @@ paths:
           schema:
             type: string
             maxLength: 512
+      responses:
+        '200':
+          description: Rendez-vous résolu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /appointments/by-ticket:
+    post:
+      tags: [appointments]
+      operationId: getAppointmentByTicket
+      summary: Identifier un RDV par numéro de ticket + date de naissance
+      description: |
+        Résout un rendez-vous du jour à partir du **numéro de ticket** émis au
+        check-in ET de la **date de naissance** du patient (garde d'accès). C'est
+        le parcours de l'app patient « Pass » (saisie manuelle : le patient tape
+        le numéro imprimé sur son ticket et sa date de naissance).
+
+        L'éditeur accepte le format de ticket qu'il expose (brut `2` ou formaté
+        `RA-2`) et vérifie que la naissance correspond au patient du RDV. Renvoie
+        la même forme que `by-code`. Ticket+naissance non concordants → `404`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetAppointmentByTicketRequest'
       responses:
         '200':
           description: Rendez-vous résolu
@@ -763,6 +799,119 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /appointments/{appointmentId}/preparatory-survey:
+    get:
+      tags: [preparatorySurvey]
+      operationId: ensurePreparatorySurvey
+      summary: Résoudre (et créer si besoin) le questionnaire préparatoire d'un RDV
+      description: |
+        **OPTIONNEL.** Renvoie le questionnaire préparatoire attendu pour ce RDV,
+        en le créant à la volée si la configuration de l'éditeur le prévoit, et
+        renvoie son identifiant de résultat (`surveyResultId`) à charger ensuite
+        via `getPreparatorySurvey`.
+
+        Un éditeur qui ne gère pas de questionnaire préparatoire (ou aucun attendu
+        pour ce RDV) renvoie `200 { "surveyResultId": null, "completed": false }`
+        (ou `404` s'il n'expose pas la fonctionnalité) : la borne / l'app patient
+        n'affiche alors pas de module questionnaire.
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+      responses:
+        '200':
+          description: État du questionnaire (surveyResultId null si aucun)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnsurePreparatorySurveyResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /preparatory-surveys/{surveyResultId}:
+    get:
+      tags: [preparatorySurvey]
+      operationId: getPreparatorySurvey
+      summary: Charger la définition et les données d'un questionnaire préparatoire
+      description: |
+        **OPTIONNEL.** Renvoie la définition du questionnaire (schéma SurveyJS,
+        `jsonDef`), les valeurs de préremplissage et les données déjà saisies.
+        `surveyResultId` provient de `ensurePreparatorySurvey`.
+      parameters:
+        - $ref: '#/components/parameters/SurveyResultId'
+      responses:
+        '200':
+          description: Définition + données du questionnaire
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreparatorySurvey'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [preparatorySurvey]
+      operationId: sendPreparatorySurvey
+      summary: Soumettre les réponses d'un questionnaire préparatoire
+      description: |
+        **OPTIONNEL.** Enregistre les réponses du patient. `data` est l'objet de
+        résultat SurveyJS (paires nom→valeur). Renvoie les éléments servant à
+        générer le PDF du résultat (définition, réponses, entête/pied…).
+      parameters:
+        - $ref: '#/components/parameters/SurveyResultId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendPreparatorySurveyRequest'
+      responses:
+        '200':
+          description: Résultat enregistré (éléments pour le PDF)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SentPreparatorySurveyResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /preparatory-surveys/{surveyResultId}/pdf:
+    post:
+      tags: [preparatorySurvey]
+      operationId: uploadPreparatorySurveyPdf
+      summary: Téléverser le PDF du questionnaire rempli
+      description: |
+        **OPTIONNEL.** Corps binaire `application/pdf` (le PDF est généré côté
+        client à partir des réponses). Sans lui, le résultat n'est pas
+        téléchargeable côté éditeur.
+      parameters:
+        - $ref: '#/components/parameters/SurveyResultId'
+      requestBody:
+        required: true
+        content:
+          application/pdf:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '204':
+          description: PDF enregistré
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /staff/sign-in:
     post:
       tags: [staff]
@@ -827,6 +976,14 @@ components:
       in: path
       required: true
       description: Identifiant du rendez-vous (`appointment.id` d'une réponse précédente)
+      schema:
+        type: string
+        maxLength: 128
+    SurveyResultId:
+      name: surveyResultId
+      in: path
+      required: true
+      description: Identifiant du résultat de questionnaire (`surveyResultId` de `ensurePreparatorySurvey`)
       schema:
         type: string
         maxLength: 128
@@ -1231,6 +1388,110 @@ components:
           $ref: '#/components/schemas/KioskIntegrationContext'
         criteria:
           $ref: '#/components/schemas/IdentifyCriteria'
+
+    GetAppointmentByTicketRequest:
+      type: object
+      required: [ticketNumber, birthDate, officePlaceVisibleId]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        ticketNumber:
+          type: string
+          maxLength: 64
+          description: >-
+            Numéro de ticket émis au check-in, tel que saisi/scanné par le
+            patient. L'éditeur accepte le format qu'il expose (brut `2` ou
+            formaté `RA-2`).
+        birthDate:
+          type: string
+          format: date
+          description: Date de naissance du patient (ISO `YYYY-MM-DD`) — garde d'accès
+        officePlaceVisibleId:
+          type: string
+          maxLength: 128
+          description: >-
+            Identifiant du lieu de soins (officePlace) où le ticket a été émis.
+            Requis : le numéro de ticket est recyclé par lieu, l'identification
+            est scopée au lieu.
+
+    EnsurePreparatorySurveyResponse:
+      type: object
+      required: [surveyResultId, completed]
+      description: État du questionnaire préparatoire d'un RDV
+      properties:
+        surveyResultId:
+          type: string
+          nullable: true
+          maxLength: 128
+          description: Identifiant du résultat à charger (null = aucun questionnaire pour ce RDV)
+        name:
+          type: string
+          nullable: true
+          description: Libellé du questionnaire
+        completed:
+          type: boolean
+          description: Le questionnaire est déjà rempli
+
+    PreparatorySurvey:
+      type: object
+      required: [jsonDef]
+      description: Définition + données d'un questionnaire préparatoire (SurveyJS)
+      properties:
+        jsonDef:
+          description: Schéma SurveyJS du questionnaire (objet ou chaîne JSON)
+        prefilledInfos:
+          type: array
+          description: Valeurs de préremplissage (nom → valeur)
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+              value: {}
+        existingData:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Réponses déjà saisies (null si vierge)
+        alreadyDone:
+          type: boolean
+          description: Le questionnaire a déjà été soumis
+
+    SendPreparatorySurveyRequest:
+      type: object
+      required: [data]
+      properties:
+        context:
+          $ref: '#/components/schemas/KioskIntegrationContext'
+        data:
+          type: object
+          additionalProperties: true
+          description: Objet de résultat SurveyJS (nom → valeur)
+
+    SentPreparatorySurveyResult:
+      type: object
+      description: Éléments renvoyés après soumission (servent à générer le PDF du résultat)
+      properties:
+        jsonDef:
+          type: string
+          nullable: true
+        jsonResult:
+          type: string
+          nullable: true
+        patient:
+          type: string
+          nullable: true
+        appointmentStartDate:
+          type: string
+          nullable: true
+          description: Date du RDV déjà formatée par l'éditeur (ex. « lundi 06 juillet 2026 »)
+        officeName:
+          type: string
+          nullable: true
+        footer:
+          type: string
+          nullable: true
 
     IdentifyResponse:
       type: object

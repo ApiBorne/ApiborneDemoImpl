@@ -187,6 +187,7 @@ export default function AgendaPage() {
         patients={patients.data?.patients ?? []}
         practitioners={reference.data?.practitioners ?? []}
         rooms={reference.data?.rooms ?? []}
+        officePlaces={reference.data?.officePlaces ?? []}
         examTypes={reference.data?.examTypes ?? []}
         exams={reference.data?.exams ?? []}
         onClose={() => {
