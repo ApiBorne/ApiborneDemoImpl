@@ -13,9 +13,9 @@
  *  - preparatory-survey state (contract `preparatorySurveyCompleted`);
  *  - the check-in trace: the `documentsComplete` boolean reported by the kiosk.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FileText, Paperclip, Trash2, X } from "lucide-react";
+import { Check, FileText, Paperclip, Stethoscope, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -85,6 +86,14 @@ export function AppointmentDocumentsDialog({
   const [preview, setPreview] = useState<api.UiDocument | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Prescriber inputs, re-synced when the dialog opens on another appointment
+  const [prescriberName, setPrescriberName] = useState("");
+  const [prescriberRpps, setPrescriberRpps] = useState("");
+  useEffect(() => {
+    setPrescriberName(appointment?.prescriberName ?? "");
+    setPrescriberRpps(appointment?.prescriberRppsId ?? "");
+  }, [appointmentId, appointment?.prescriberName, appointment?.prescriberRppsId]);
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["documents", appointmentId] });
     onChanged();
@@ -118,6 +127,15 @@ export function AppointmentDocumentsDialog({
       }
       refresh();
       toast.success("Document attached");
+    },
+    onError,
+  });
+  const prescriberMutation = useMutation({
+    mutationFn: (prescriber: { name: string; rppsId?: string | null } | null) =>
+      api.setPrescriber(appointmentId!, prescriber),
+    onSuccess: (_, prescriber) => {
+      onChanged();
+      toast.success(prescriber ? "Prescriber saved" : "Prescriber cleared");
     },
     onError,
   });
@@ -163,7 +181,8 @@ export function AppointmentDocumentsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Check-in trace: the kiosk-reported `documentsComplete` boolean. */}
+        {/* Check-in trace: the kiosk-reported `documentsComplete` boolean, with
+            the CURRENT outstanding gaps as the reason when incomplete. */}
         {appointment.checkinDocumentsComplete != null && (
           <div
             className={
@@ -174,6 +193,26 @@ export function AppointmentDocumentsDialog({
           >
             Kiosk check-in reported the patient file as{" "}
             <strong>{appointment.checkinDocumentsComplete ? "complete" : "incomplete"}</strong>.
+            {!appointment.checkinDocumentsComplete && (
+              <ul className="mt-1 list-disc pl-5 text-xs">
+                {appointment.missingDocumentTypes.map((type) => (
+                  <li key={type}>Missing document: {labelOf(type)}</li>
+                ))}
+                {appointment.preparatorySurveyCompleted === false && (
+                  <li>Preparatory survey expected but not filled</li>
+                )}
+                {!appointment.prescriberName && <li>Prescriber not set</li>}
+                {appointment.anomalyCodes.length > 0 && (
+                  <li>Anomaly codes reported by the kiosk: {appointment.anomalyCodes.join(", ")}</li>
+                )}
+                {appointment.missingDocumentTypes.length === 0 &&
+                  appointment.preparatorySurveyCompleted !== false &&
+                  appointment.prescriberName != null &&
+                  appointment.anomalyCodes.length === 0 && (
+                    <li>No outstanding gap right now — the file was completed after check-in.</li>
+                  )}
+              </ul>
+            )}
           </div>
         )}
 
@@ -254,6 +293,68 @@ export function AppointmentDocumentsDialog({
               <SelectItem value="done">Filled ✓</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <Separator />
+
+        {/* Prescriber (contract appointment.prescriber — the kiosk sets it via
+            PUT /appointments/{id}/prescriber, e.g. after a prescription-upload
+            proposal; feeds "check-in only if the prescriber is set"). */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="flex items-center gap-1.5">
+              <Stethoscope className="size-3.5" /> Prescriber
+            </Label>
+            {appointment.prescriberName ? (
+              <span className="text-muted-foreground text-xs">
+                Set: {appointment.prescriberName}
+                {appointment.prescriberRppsId ? ` · RPPS ${appointment.prescriberRppsId}` : ""}
+              </span>
+            ) : (
+              <span className="text-xs text-amber-700 dark:text-amber-300">Not set</span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="w-64"
+              placeholder="Prescriber name"
+              value={prescriberName}
+              onChange={(event) => setPrescriberName(event.target.value)}
+            />
+            <Input
+              className="w-44"
+              placeholder="RPPS id (optional)"
+              value={prescriberRpps}
+              onChange={(event) => setPrescriberRpps(event.target.value)}
+            />
+            <Button
+              size="sm"
+              disabled={!prescriberName.trim() || prescriberMutation.isPending}
+              onClick={() =>
+                prescriberMutation.mutate({
+                  name: prescriberName.trim(),
+                  rppsId: prescriberRpps.trim() || null,
+                })
+              }
+            >
+              Save
+            </Button>
+            {appointment.prescriberName && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={prescriberMutation.isPending}
+                onClick={() => prescriberMutation.mutate(null)}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+          <p className="text-muted-foreground text-xs">
+            The kiosk fills it through the contract (prescription upload → patient validates a
+            proposal). When the kiosk&apos;s &quot;check-in only if the prescriber is set&quot;
+            condition is enabled, an empty prescriber blocks self check-in.
+          </p>
         </div>
 
         <Separator />

@@ -65,6 +65,7 @@ export interface UiAppointment {
   ticketNumberFormatted: string | null;
   anomalyCodes: string[];
   prescriberName: string | null;
+  prescriberRppsId: string | null;
   /** Contract documentType strings required for this appointment. */
   requiredDocumentTypes: string[];
   /** Required types with no attached document yet. */
@@ -202,6 +203,13 @@ export function setRequiredDocumentTypes(
   types: string[],
 ): Promise<{ ok: boolean; types: string[] }> {
   return request("PUT", `/api/demo/appointments/${appointmentId}/required-documents`, { types });
+}
+
+export function setPrescriber(
+  appointmentId: number,
+  prescriber: { name: string; rppsId?: string | null } | null,
+): Promise<{ ok: boolean; prescriber: { name: string; rppsId: string | null } | null }> {
+  return request("PUT", `/api/demo/appointments/${appointmentId}/prescriber`, { prescriber });
 }
 
 export function setPreparatorySurvey(

@@ -34,6 +34,7 @@ export function toUiAppointment(a: AppointmentRow) {
     ticketNumberFormatted: a.ticket_number_formatted,
     anomalyCodes: a.anomaly_codes ? (JSON.parse(a.anomaly_codes) as string[]) : [],
     prescriberName: a.prescriber_name,
+    prescriberRppsId: a.prescriber_rpps_id,
     requiredDocumentTypes,
     missingDocumentTypes: requiredDocumentTypes.filter((t) => !providedTypes.has(t)),
     preparatorySurveyCompleted:
