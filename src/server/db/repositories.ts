@@ -445,6 +445,26 @@ export function patchPatient(id: number, fields: Record<string, unknown>): void 
 }
 
 /**
+ * Delete a patient with their appointments and attached documents — cascade
+ * applicative (the schema has no ON DELETE CASCADE). Demo tooling only, used
+ * by the /patients page.
+ */
+export function deletePatient(id: number): boolean {
+  const db = getDb();
+  if (!getPatient(id)) {
+    return false;
+  }
+  db.transaction(() => {
+    db.prepare(
+      "DELETE FROM documents WHERE appointment_id IN (SELECT id FROM appointments WHERE patient_id = ?)",
+    ).run(id);
+    db.prepare("DELETE FROM appointments WHERE patient_id = ?").run(id);
+    db.prepare("DELETE FROM patients WHERE id = ?").run(id);
+  })();
+  return true;
+}
+
+/**
  * Multi-criteria patient search for POST /patients/identify. Contract rules:
  * ALL provided criteria are COMBINED (AND) and the result is capped (~10).
  *

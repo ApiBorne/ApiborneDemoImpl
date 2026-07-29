@@ -7,6 +7,11 @@
  *  - ALL provided criteria are COMBINED (the contract mandates it) — the NIR
  *    alone would be ambiguous on a family Vitale card (shared by every
  *    beneficiary); it MUST tolerate spaces;
+ *  - if `context.config.identification.twoFieldsIdentification` is true and
+ *    the strict search finds NOTHING, the editor MUST retry the two-field
+ *    crossed searches (lastName+birthDate, firstName+birthDate,
+ *    lastName+firstName) — kiosk feature « Identifier le patient avec 2
+ *    champs parmi 3 »;
  *  - no match → 200 { patients: [] } (NOT an error);
  *  - a patient without appointments today → appointments: [];
  *  - result capped (~10 patients) — enforced in the repository.
@@ -33,6 +38,9 @@ export const POST = withErrorBoundary(
     if (authError) return authError;
 
     const body = (await request.json().catch(() => null)) as {
+      context?: {
+        config?: { identification?: { twoFieldsIdentification?: boolean } };
+      };
       criteria?: {
         socialSecurityId?: string;
         lastName?: string;
@@ -47,15 +55,41 @@ export const POST = withErrorBoundary(
     }
 
     const { criteria } = body;
-    const patients = searchPatients({
+    const lastName = criteria.lastName ?? null;
+    const firstName = criteria.firstName ?? null;
+    const birthDate = criteria.birthDate ?? null;
+    let patients = searchPatients({
       // NIR: digits only — the contract requires tolerating spaces.
       socialSecurityId: criteria.socialSecurityId
         ? criteria.socialSecurityId.replace(/\s+/g, "")
         : null,
-      lastName: criteria.lastName ?? null,
-      firstName: criteria.firstName ?? null,
-      birthDate: criteria.birthDate ?? null,
+      lastName,
+      firstName,
+      birthDate,
     });
+
+    // Two-field fallback (contract): only when the strict search found
+    // nothing, and only over pairs whose BOTH fields were provided. Results
+    // of the pairs are merged (dedup by id) and capped like the strict path.
+    const twoFieldsIdentification =
+      body.context?.config?.identification?.twoFieldsIdentification === true;
+    if (patients.length === 0 && twoFieldsIdentification) {
+      const pairs = [
+        { lastName, birthDate },
+        { firstName, birthDate },
+        { lastName, firstName },
+      ].filter((pair) => Object.values(pair).every((value) => value != null && value !== ""));
+      const seen = new Set<number>();
+      for (const pair of pairs) {
+        for (const patient of searchPatients(pair)) {
+          if (!seen.has(patient.id)) {
+            seen.add(patient.id);
+            patients.push(patient);
+          }
+        }
+      }
+      patients = patients.slice(0, 10);
+    }
 
     const { start, end } = dayWindowOf(new Date());
     return ok({

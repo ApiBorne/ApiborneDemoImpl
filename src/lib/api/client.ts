@@ -250,6 +250,24 @@ export function createPatient(data: {
   return request("POST", "/api/demo/patients", data);
 }
 
+export function updatePatient(
+  id: number,
+  data: {
+    firstName?: string;
+    lastName?: string;
+    birthDate?: string;
+    socialSecurityId?: string | null;
+    email?: string | null;
+    mobilePhone?: string | null;
+  },
+): Promise<{ ok: boolean }> {
+  return request("PATCH", `/api/demo/patients/${id}`, data);
+}
+
+export function deletePatient(id: number): Promise<{ ok: boolean }> {
+  return request("DELETE", `/api/demo/patients/${id}`);
+}
+
 export function getSettings(): Promise<{
   settings: Record<string, string | null>;
   deviceIds: string[];
