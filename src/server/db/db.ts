@@ -20,7 +20,11 @@ import {
   seedOfficePlacesIfEmpty,
 } from "./seed";
 
-const DB_DIR = path.join(process.cwd(), "data");
+// DEMO_DB_DIR : dossier de la base (défaut ./data). En production Render,
+// pointer sur le DISQUE PERSISTANT monté (ex. DEMO_DB_DIR=/var/data) pour que
+// la conf/les données survivent aux redéploiements (le filesystem du service
+// est éphémère).
+const DB_DIR = process.env.DEMO_DB_DIR || path.join(process.cwd(), "data");
 const DB_FILE = path.join(DB_DIR, "demo.db");
 
 const globalForDb = globalThis as unknown as { __demoRisDb?: Database.Database };

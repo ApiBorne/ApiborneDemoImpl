@@ -135,4 +135,9 @@ export type SettingKey =
   // End-to-end encryption: one or more concatenated private key PEMs (newest
   // first — rotation). Strict mode is automatic: clear-text is rejected as
   // soon as a key is configured.
-  | "contractEncryptionPrivateKeys";
+  | "contractEncryptionPrivateKeys"
+  // IANA timezone of the office (e.g. "Europe/Paris") — bounds the "today"
+  // window of the kiosk journey (identify, by-ticket…). Without it, a server
+  // running in UTC would look at YESTERDAY's appointments between midnight
+  // and 2am French time.
+  | "officeTimezone";

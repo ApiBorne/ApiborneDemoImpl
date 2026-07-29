@@ -24,6 +24,7 @@ const EDITABLE_KEYS: SettingKey[] = [
   "pushEnabled",
   "enforceKnownDevices",
   "contractEncryptionPrivateKeys",
+  "officeTimezone",
 ];
 
 export function GET(): NextResponse {

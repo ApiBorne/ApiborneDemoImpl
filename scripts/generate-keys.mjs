@@ -25,7 +25,9 @@ import Database from "better-sqlite3";
 const replace = process.argv.includes("--replace");
 
 const root = process.cwd();
-const dbDir = path.join(root, "data");
+// Même résolution que src/server/db/db.ts : DEMO_DB_DIR (disque persistant
+// Render en prod), défaut ./data.
+const dbDir = process.env.DEMO_DB_DIR || path.join(root, "data");
 const dbFile = path.join(dbDir, "demo.db");
 
 console.log("Generating RSA-4096 key pair (a few seconds)…");

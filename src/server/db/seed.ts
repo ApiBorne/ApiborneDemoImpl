@@ -207,4 +207,8 @@ export function seedIfEmpty(db: Database.Database): void {
   // ApiBorne admin (no duplicate provisioning here). true = strict contract
   // behaviour (unknown device -> 401 UNKNOWN_DEVICE), like EasyDoct.
   insertSetting.run("enforceKnownDevices", process.env.SEED_ENFORCE_KNOWN_DEVICES ?? "false");
+  // Fuseau horaire du cabinet (IANA) : borne la journée « aujourd'hui » du
+  // parcours borne (identify, by-ticket…). Sans lui, un serveur en UTC
+  // (Render) cherche les RDV de la VEILLE entre minuit et 2 h heure française.
+  insertSetting.run("officeTimezone", process.env.SEED_OFFICE_TIMEZONE ?? "Europe/Paris");
 }

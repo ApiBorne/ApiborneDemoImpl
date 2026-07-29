@@ -6,6 +6,7 @@ import {
   getAppointment,
   getAppointmentByVisibleId,
   getPatient,
+  getSetting,
   listAppointmentsOfPatientOnDay,
 } from "@/server/db/repositories";
 import type { AppointmentRow } from "@/server/db/types";
@@ -34,13 +35,35 @@ export function resolveAppointment(contractId: string): AppointmentRow | null {
     : null;
 }
 
-/** Local-day window around a date (the contract works on "today's" journey). */
+/**
+ * Day window around a date IN THE OFFICE TIMEZONE (setting `officeTimezone`,
+ * default Europe/Paris) — the contract works on "today's" journey as the
+ * PATIENT lives it. Computing the day in the server's local time broke on
+ * cloud hosts running in UTC: between midnight and 2am French (summer) time,
+ * `identify` searched YESTERDAY's appointments and found none.
+ */
 export function dayWindowOf(date: Date): { start: Date; end: Date } {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { start, end };
+  const timeZone = getSetting("officeTimezone") || "Europe/Paris";
+  try {
+    // `date` as wall-clock time of the office; midnight of that wall-clock
+    // day, shifted back by the (server-local vs office) offset, gives the
+    // UTC instant of the office's midnight. Approximation acceptable for a
+    // demo around DST transitions.
+    const local = new Date(date.toLocaleString("en-US", { timeZone }));
+    const startLocal = new Date(local);
+    startLocal.setHours(0, 0, 0, 0);
+    const offset = date.getTime() - local.getTime();
+    const start = new Date(startLocal.getTime() + offset);
+    const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    return { start, end };
+  } catch {
+    // Fuseau invalide dans les settings : repli sur la journée locale serveur.
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
 }
 
 /**

@@ -46,6 +46,7 @@ export default function SettingsPage() {
         apiborneServerBaseUrl: s.apiborneServerBaseUrl ?? "",
         pushEnabled: s.pushEnabled ?? "true",
         contractEncryptionPrivateKeys: s.contractEncryptionPrivateKeys ?? "",
+        officeTimezone: s.officeTimezone ?? "Europe/Paris",
       });
     }
   }, [settingsQuery.data]);
@@ -119,6 +120,19 @@ export default function SettingsPage() {
                 setValues((v) => ({ ...v, pushEnabled: checked ? "true" : "false" }))
               }
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Office timezone (IANA)</Label>
+            <Input
+              value={values.officeTimezone ?? ""}
+              onChange={set("officeTimezone")}
+              placeholder="Europe/Paris"
+            />
+            <p className="text-muted-foreground text-xs">
+              Bounds the &quot;today&quot; window of the kiosk journey (identify, by-ticket…).
+              Without it, a server running in UTC looks at yesterday&apos;s appointments between
+              midnight and 2am French summer time.
+            </p>
           </div>
         </CardContent>
       </Card>
