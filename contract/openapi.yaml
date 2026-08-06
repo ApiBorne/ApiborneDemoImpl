@@ -17,8 +17,22 @@ info:
     complet : **identification, consultation du RDV, mise à jour du patient, gestion
     des documents, check-in** et opérations satellites.
 
-    La borne appelle l'éditeur **en direct** pendant le parcours patient. Le serveur
-    ApiBorne ne sert qu'à fournir la configuration de la borne au démarrage.
+    Pendant le parcours patient, l'éditeur est appelé selon l'un des deux modes de
+    connectivité configurés côté ApiBorne (réglage `kioskContractVia`, page
+    Intégration de l'admin) :
+
+    - **borne en direct** (défaut) : la borne appelle l'éditeur directement depuis
+      son navigateur — éventuellement sur une adresse locale du réseau de
+      l'établissement, différente de celle que voit le serveur ApiBorne ;
+    - **relais serveur** : la borne appelle
+      `{serveur ApiBorne}/api/contractRelay/api/apiborneIntegrationService/...` et
+      le serveur ApiBorne relaie la requête **telle quelle** vers l'éditeur
+      (passthrough — éditeur injoignable → `502 RELAY_UPSTREAM_UNREACHABLE` côté
+      borne).
+
+    Le contrat vu par l'éditeur est identique dans les deux modes : seul le chemin
+    réseau change. Dans tous les cas, le serveur ApiBorne reste requis pour la
+    configuration de la borne au démarrage et la numérotation des tickets.
 
     **Toutes les opérations du contrat sont OBLIGATOIRES.** Il n'y a pas de routes
     optionnelles ni de déclaration de support : un éditeur qui n'a pas la
@@ -49,15 +63,23 @@ info:
     peut lui être inconnu). Un éditeur mono-site peut l'ignorer. Ce header doit
     être autorisé dans `Access-Control-Allow-Headers` (CORS).
 
-    ## Chiffrement de bout en bout (optionnel)
+    En mode **relais serveur**, ces headers (`X-Kiosk-Auth-Key`,
+    `X-Kiosk-Device-Id`, `X-Kiosk-Office-Id`) sont transmis **inchangés** à
+    l'éditeur : `X-Kiosk-Device-Id` reste l'identifiant de la borne réelle, jamais
+    celui du serveur ApiBorne — la validation attendue de l'éditeur est identique
+    dans les deux modes.
 
-    Le contrat supporte un chiffrement applicatif **de bout en bout** entre la borne
+    ## Chiffrement de bout en bout (obligatoire)
+
+    Le contrat impose un chiffrement applicatif **de bout en bout** entre la borne
     et l'éditeur, par-dessus TLS : l'établissement génère une paire de clés RSA, la
     clé PRIVÉE reste sur le serveur de l'éditeur, la clé PUBLIQUE est saisie dans
     l'admin ApiBorne et transportée à la borne via sa configuration. Le serveur
     ApiBorne et tous les intermédiaires réseau sont incapables de déchiffrer
-    (zero-knowledge). **Sans clé configurée, rien ne change** : les échanges restent
-    en clair (TLS seul) et l'éditeur n'a rien à implémenter.
+    (zero-knowledge) : en mode **relais serveur**, le relais ne voit passer que des
+    corps chiffrés (passthrough zero-knowledge). C'est aussi ce chiffrement qui
+    rend acceptable une URL contrat `http` sur un réseau local en mode borne
+    directe.
 
     ### Périmètre
 
@@ -138,6 +160,10 @@ info:
 
     - `Access-Control-Allow-Headers: …, X-Kiosk-Encryption, X-Kiosk-Encryption-Key`
     - `Access-Control-Expose-Headers: X-Kiosk-Encryption`
+
+    En mode **relais serveur**, les routes du parcours ne reçoivent que des appels
+    serveur → serveur : l'exigence CORS navigateur (preflights et headers
+    ci-dessus) ne s'applique plus au parcours.
 
     ## Contexte de configuration (`context`)
 

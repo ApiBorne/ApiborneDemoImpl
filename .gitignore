@@ -7,6 +7,8 @@ out/
 
 # Local SQLite database (recreated and seeded automatically on first start)
 data/
+# E2E SQLite database (seeded by the e2e harness, may hold test encryption keys)
+data-e2e/
 
 # Environment (copy .env.example to .env.local and adjust)
 .env

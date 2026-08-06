@@ -14,11 +14,19 @@ info:
     - pour **sonder l'intégration** (config-check) : tant que les cinq routes de
       référentiels (lieux, types d'examens, examens, praticiens, salles) ne
       répondent pas correctement, la configuration des bornes reste verrouillée
-      dans l'admin ApiBorne — `/config/document-types` est recommandée mais
-      hors sonde ;
+      dans l'admin ApiBorne (source des référentiels HTTP, par défaut) —
+      `/config/document-types` est recommandée mais hors sonde ;
     - pour **alimenter l'admin** : rattacher une borne à un lieu, cibler des
       messages/critères par examen, type d'examen, praticien ou salle, amorcer
       les préfixes de tickets.
+
+    **Alternative — référentiels statiques** : quand la source des référentiels
+    configurée côté ApiBorne est un **JSON uploadé dans l'admin**
+    (`configReferentialsSource = 'json'`) au lieu du contrat HTTP, ces routes ne
+    sont **pas appelées du tout** — l'éditeur peut ne jamais les implémenter.
+    La sonde config-check valide alors chaque référentiel par **présence de la
+    section** dans le JSON (aucun appel HTTP) : les cinq routes ne verrouillent
+    plus la configuration des bornes.
 
     Authentification : header `X-Kiosk-Auth-Key` uniquement (la clé
     d'autorisation compte, affichée dans l'admin ApiBorne, page Connectivité) —

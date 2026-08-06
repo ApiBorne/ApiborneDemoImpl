@@ -142,6 +142,30 @@ export function seedIfEmpty(db: Database.Database): void {
     );
   }
 
+  // Patient e2e aligné sur la carte Vitale SIMULÉE par défaut de la borne
+  // (SimulateVitalCard.js : ROUSSEAU GUILLAUME, 10/06/1973, NIR partagé de la
+  // carte famille) + un RDV en toute fin de journée : toujours « dans le
+  // futur » pendant les heures de run → déclenche le flux « patient trop en
+  // avance » quand maxEarlyArrivalMinutes est configuré. Seedé UNIQUEMENT en
+  // mode e2e (SEED_E2E_KIOSK_PATIENT) pour ne pas polluer l'agenda de démo.
+  const seedE2eKioskPatient = process.env.SEED_E2E_KIOSK_PATIENT === "true";
+  let e2ePatientId: number | bigint | null = null;
+  if (seedE2eKioskPatient) {
+    const inserted = insertPatient.run(
+      "Guillaume",
+      "ROUSSEAU",
+      "1973-06-10",
+      "173067511218814",
+      "guillaume.rousseau@example.com",
+      "0467000000",
+      "0600000000",
+      "1 rue de la Démo",
+      "34300",
+      "Agde",
+    );
+    e2ePatientId = inserted.lastInsertRowid;
+  }
+
   // A few appointments today so the agenda is not empty on first launch.
   const insertAppointment = db.prepare(
     `INSERT INTO appointments (visible_id, patient_id, practitioner_id, room_id, exam_type_id, exam_label, start_date, duration_minutes, status)
@@ -153,6 +177,19 @@ export function seedIfEmpty(db: Database.Database): void {
   insertAppointment.run(newVisibleId(), 4, 2, 2, 2, "SCANNER CEREBRAL", isoDateAt(14, 0), 30);
   insertAppointment.run(newVisibleId(), 5, 3, 3, 3, "IRM GENOU", isoDateAt(11, 0), 40);
   insertAppointment.run(newVisibleId(), 6, 3, 4, 4, "ECHOGRAPHIE ABDOMINALE", isoDateAt(15, 30), 20);
+  if (e2ePatientId != null) {
+    // RDV e2e « trop en avance » : 23:30 — voir le commentaire du patient e2e.
+    insertAppointment.run(
+      newVisibleId(),
+      e2ePatientId,
+      1,
+      1,
+      1,
+      "RADIO E2E FIN DE JOURNEE",
+      isoDateAt(23, 30),
+      20,
+    );
+  }
   // Preparatory-survey showcase (contract field preparatorySurveyCompleted):
   // the IRM has its survey filled, the SCANNER ABDOMINAL is still waiting for
   // it, every other appointment expects no survey (NULL).
@@ -211,4 +248,11 @@ export function seedIfEmpty(db: Database.Database): void {
   // parcours borne (identify, by-ticket…). Sans lui, un serveur en UTC
   // (Render) cherche les RDV de la VEILLE entre minuit et 2 h heure française.
   insertSetting.run("officeTimezone", process.env.SEED_OFFICE_TIMEZONE ?? "Europe/Paris");
+  // Clé(s) privée(s) du chiffrement de bout en bout (PEM concaténés, plus
+  // récente en premier). Vide par défaut (mode clair tant qu'aucune clé) ;
+  // le harnais e2e la seed pour tester le protocole chiffré complet.
+  insertSetting.run(
+    "contractEncryptionPrivateKeys",
+    process.env.SEED_CONTRACT_ENCRYPTION_PRIVATE_KEYS ?? "",
+  );
 }
